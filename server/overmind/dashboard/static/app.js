@@ -1,7 +1,18 @@
-// server/overmind/dashboard/static/app.js
+/* =========================================================
+   OVERMIND DASHBOARD — app.js
+   ========================================================= */
 
-const API_BASE = window.location.origin;
+const API = window.location.origin;
 let currentRepo = '';
+let graphData = null;
+let timelineData = null;
+
+// --- Color palette ---
+const C = {
+    correction: '#ff4757', decision: '#ffa235', discovery: '#a78bfa',
+    change: '#00e5a0', broadcast: '#f472b6',
+    user: '#38bdf8', scope: '#5a6a7e', accent: '#00e5a0',
+};
 
 // --- Tab switching ---
 document.querySelectorAll('.tab').forEach(btn => {
@@ -10,548 +21,557 @@ document.querySelectorAll('.tab').forEach(btn => {
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById(btn.dataset.tab).classList.add('active');
-        // Re-render graph/timeline when tab becomes visible (needs correct dimensions)
         if (currentRepo) {
-            if (btn.dataset.tab === 'graph') loadGraph();
-            if (btn.dataset.tab === 'timeline') loadTimeline();
+            if (btn.dataset.tab === 'graph') renderGraph(graphData);
+            if (btn.dataset.tab === 'timeline') renderTimeline(timelineData);
         }
     });
 });
 
-function closeDetail() {
-    dismissPopover();
-}
-
-// --- Repo list loading ---
-async function loadRepos() {
-    const res = await fetch(`${API_BASE}/api/repos`);
+// --- Repo loading ---
+(async function loadRepos() {
+    const res = await fetch(`${API}/api/repos`);
     const repos = await res.json();
-    const select = document.getElementById('repo-id');
-    // Keep the default option
-    select.innerHTML = '<option value="">-- select repo --</option>';
-    for (const repo of repos) {
-        const opt = document.createElement('option');
-        opt.value = repo;
-        opt.textContent = repo;
-        select.appendChild(opt);
-    }
-    // Auto-select if only one repo
-    if (repos.length === 1) {
-        select.value = repos[0];
-        loadAll();
-    }
-}
+    const sel = document.getElementById('repo-id');
+    sel.innerHTML = '<option value="">select repository</option>';
+    repos.forEach(r => {
+        const o = document.createElement('option');
+        o.value = r; o.textContent = r;
+        sel.appendChild(o);
+    });
+    if (repos.length === 1) { sel.value = repos[0]; loadAll(); }
+})();
 
-// Load repos on page load
-loadRepos();
-
-// --- Data loading ---
 async function loadAll() {
-    currentRepo = document.getElementById('repo-id').value.trim();
+    currentRepo = document.getElementById('repo-id').value;
     if (!currentRepo) return;
-    await Promise.all([loadOverview(), loadGraph(), loadTimeline()]);
+    await Promise.all([loadOverview(), loadGraphData(), loadTimelineData()]);
 }
 
+// ============================================================
+// OVERVIEW
+// ============================================================
 async function loadOverview() {
-    const [reportRes, pullRes] = await Promise.all([
-        fetch(`${API_BASE}/api/report?repo_id=${encodeURIComponent(currentRepo)}`),
-        fetch(`${API_BASE}/api/memory/pull?repo_id=${encodeURIComponent(currentRepo)}&limit=20`),
+    const [repRes, pullRes] = await Promise.all([
+        fetch(`${API}/api/report?repo_id=${enc(currentRepo)}`),
+        fetch(`${API}/api/memory/pull?repo_id=${enc(currentRepo)}&limit=30`),
     ]);
-    const report = await reportRes.json();
+    const report = await repRes.json();
     const pull = await pullRes.json();
 
-    document.getElementById('stat-pushes').textContent = report.total_pushes;
-    document.getElementById('stat-pulls').textContent = report.total_pulls;
-    document.getElementById('stat-users').textContent = report.unique_users;
+    animateNumber('stat-pushes', report.total_pushes);
+    animateNumber('stat-pulls', report.total_pulls);
+    animateNumber('stat-users', report.unique_users);
 
-    // Type chart
     renderTypeChart(report.events_by_type);
-
-    // Recent events table
-    const tbody = document.querySelector('#events-table tbody');
-    tbody.innerHTML = '';
-    for (const evt of pull.events) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${new Date(evt.ts).toLocaleString()}</td>
-            <td>${evt.user}</td>
-            <td><span class="type-badge type-${evt.type}">${evt.type}</span></td>
-            <td>${evt.result}</td>
-        `;
-        tbody.appendChild(tr);
-    }
+    renderEventFeed(pull.events);
 }
+
+function animateNumber(id, target) {
+    const el = document.getElementById(id);
+    const start = parseInt(el.textContent) || 0;
+    const duration = 400;
+    const t0 = performance.now();
+    function tick(now) {
+        const p = Math.min((now - t0) / duration, 1);
+        el.textContent = Math.round(start + (target - start) * easeOut(p));
+        if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+}
+function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
 
 function renderTypeChart(byType) {
-    const container = document.getElementById('type-chart');
-    container.innerHTML = '';
+    const box = document.getElementById('type-chart');
+    box.innerHTML = '';
     const entries = Object.entries(byType);
-    if (entries.length === 0) return;
+    if (!entries.length) return;
 
-    const width = 500, height = 200, margin = { top: 20, right: 20, bottom: 40, left: 50 };
-    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    const w = box.clientWidth || 600, h = 80;
+    const total = entries.reduce((s, d) => s + d[1], 0);
 
-    const x = d3.scaleBand()
-        .domain(entries.map(d => d[0]))
-        .range([margin.left, width - margin.right])
-        .padding(0.3);
-
-    const y = d3.scaleLinear()
-        .domain([0, d3.max(entries, d => d[1])])
-        .nice()
-        .range([height - margin.bottom, margin.top]);
-
-    const colorMap = {
-        correction: '#f85149', decision: '#d29922', discovery: '#a371f7',
-        change: '#3fb950', broadcast: '#f778ba',
-    };
-
-    svg.selectAll('rect')
-        .data(entries)
-        .join('rect')
-        .attr('x', d => x(d[0]))
-        .attr('y', d => y(d[1]))
-        .attr('width', x.bandwidth())
-        .attr('height', d => y(0) - y(d[1]))
-        .attr('fill', d => colorMap[d[0]] || '#8b949e')
-        .attr('rx', 3);
-
-    svg.append('g')
-        .attr('transform', `translate(0,${height - margin.bottom})`)
-        .call(d3.axisBottom(x))
-        .selectAll('text').attr('fill', '#8b949e');
-
-    svg.append('g')
-        .attr('transform', `translate(${margin.left},0)`)
-        .call(d3.axisLeft(y).ticks(5))
-        .selectAll('text').attr('fill', '#8b949e');
-
-    svg.selectAll('.domain, .tick line').attr('stroke', '#30363d');
+    const svg = d3.select(box).append('svg').attr('width', w).attr('height', h);
+    let x = 0;
+    entries.forEach(([type, count]) => {
+        const barW = (count / total) * (w - 8 * entries.length);
+        const g = svg.append('g').attr('transform', `translate(${x}, 0)`);
+        g.append('rect')
+            .attr('y', 20).attr('width', barW).attr('height', 36)
+            .attr('rx', 6).attr('fill', C[type] || C.change).attr('opacity', 0.2);
+        g.append('rect')
+            .attr('y', 20).attr('width', 0).attr('height', 36)
+            .attr('rx', 6).attr('fill', C[type] || C.change).attr('opacity', 0.7)
+            .transition().duration(600).delay(200).attr('width', barW);
+        g.append('text')
+            .attr('x', barW / 2).attr('y', 14)
+            .attr('text-anchor', 'middle')
+            .attr('fill', C[type] || '#8b949e')
+            .attr('font-size', '10px').attr('font-weight', '500')
+            .text(`${type} (${count})`);
+        x += barW + 8;
+    });
 }
 
-// --- Graph ---
-async function loadGraph() {
-    const res = await fetch(`${API_BASE}/api/report/graph?repo_id=${encodeURIComponent(currentRepo)}`);
-    const data = await res.json();
-    renderGraph(data);
+function renderEventFeed(events) {
+    const list = document.getElementById('events-list');
+    const badge = document.getElementById('event-count');
+    badge.textContent = `${events.length} events`;
+    list.innerHTML = '';
+
+    events.forEach((evt, i) => {
+        const row = document.createElement('div');
+        row.className = 'event-row';
+        row.style.setProperty('--i', i);
+
+        const typeAbbr = { correction: 'FIX', decision: 'DEC', discovery: 'NEW', broadcast: 'BCT', change: 'CHG' };
+        const urgentTag = evt.priority === 'urgent'
+            ? '<span class="event-meta-urgent">urgent</span>' : '';
+
+        row.innerHTML = `
+            <div class="event-type-dot event-type-dot--${evt.type}">
+                ${typeAbbr[evt.type] || evt.type.substring(0, 3).toUpperCase()}
+            </div>
+            <div class="event-body">
+                <div class="event-result">${esc(evt.result)}</div>
+                <div class="event-meta">
+                    <span class="event-meta-user">${esc(evt.user)}</span>
+                    <span>${new Date(evt.ts).toLocaleString()}</span>
+                    ${urgentTag}
+                </div>
+            </div>
+        `;
+        list.appendChild(row);
+    });
+}
+
+// ============================================================
+// GRAPH — 3-Column: Agents → Events → Scopes
+// ============================================================
+async function loadGraphData() {
+    const res = await fetch(`${API}/api/report/graph?repo_id=${enc(currentRepo)}`);
+    graphData = await res.json();
+    // Render only if graph tab is active
+    if (document.getElementById('graph').classList.contains('active')) {
+        renderGraph(graphData);
+    }
 }
 
 function renderGraph(data) {
+    if (!data) return;
     const svg = d3.select('#graph-svg');
     svg.selectAll('*').remove();
-    d3.select('#graph-popover').remove();
+    dismissPopover();
 
     const container = document.getElementById('graph-container');
-    const width = container.clientWidth || 900;
-    const height = container.clientHeight || 600;
-    svg.attr('width', width).attr('height', height)
-       .attr('viewBox', `0 0 ${width} ${height}`);
+    const W = container.clientWidth || 900;
+    const H = container.clientHeight || 600;
+    svg.attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
 
-    if (data.nodes.length === 0) {
-        svg.append('text').attr('x', width / 2).attr('y', height / 2)
-            .attr('text-anchor', 'middle').attr('fill', '#8b949e')
-            .text('No data. Push some events first.');
+    if (!data.nodes.length) {
+        svg.append('text').attr('x', W / 2).attr('y', H / 2)
+            .attr('text-anchor', 'middle').attr('fill', '#364152')
+            .attr('font-size', '14px')
+            .text('No events yet. Push some memory events to see the graph.');
         return;
     }
 
     const polyScopes = new Set(data.polymorphisms.map(p => p.scope));
 
-    // --- Classify nodes into 3 columns ---
-    const users = data.nodes.filter(n => n.type === 'user');
+    const users  = data.nodes.filter(n => n.type === 'user');
     const events = data.nodes.filter(n => n.type === 'event');
     const scopes = data.nodes.filter(n => n.type === 'scope');
 
-    // Build lookup: which user pushed which events, which events affect which scopes
-    const userEvents = {};  // userId -> [eventIds]
-    const eventScopes = {}; // eventId -> [scopeIds]
+    // Build adjacency
+    const userEvts = {}, evtScps = {};
     data.edges.forEach(e => {
-        if (e.relation === 'pushed') {
-            (userEvents[e.source] = userEvents[e.source] || []).push(e.target);
-        }
-        if (e.relation === 'affects') {
-            (eventScopes[e.source] = eventScopes[e.source] || []).push(e.target);
-        }
+        if (e.relation === 'pushed')  (userEvts[e.source] = userEvts[e.source] || []).push(e.target);
+        if (e.relation === 'affects') (evtScps[e.source] = evtScps[e.source] || []).push(e.target);
     });
 
-    // --- 3-column layout: Users | Events | Scopes ---
-    const colX = [140, width * 0.42, width * 0.78];
-    const legendW = 180; // space for legend on the left
+    // --- Layout ---
+    const colX = [130, W * 0.40, W * 0.78];
+    const PAD_TOP = 60;
 
-    // Position users vertically, evenly spaced
-    const userSpacing = Math.min(80, (height - 80) / Math.max(users.length, 1));
-    const userStartY = (height - (users.length - 1) * userSpacing) / 2;
-    users.forEach((u, i) => { u.x = colX[0]; u.y = userStartY + i * userSpacing; });
+    // Users
+    const userH = Math.min(90, (H - PAD_TOP * 2) / Math.max(users.length, 1));
+    const userStartY = PAD_TOP + (H - PAD_TOP * 2 - (users.length - 1) * userH) / 2;
+    users.forEach((u, i) => { u.x = colX[0]; u.y = userStartY + i * userH; });
 
-    // Position events: group by user, vertically aligned with their user
-    const eventPositions = {};
-    let globalEventIndex = 0;
+    // Events: group by user
     users.forEach(u => {
-        const evtIds = userEvents[u.id] || [];
-        const evtNodes = evtIds.map(id => events.find(e => e.id === id)).filter(Boolean);
-        const spacing = Math.min(55, (userSpacing * 0.9));
-        const startY = u.y - ((evtNodes.length - 1) * spacing) / 2;
-        evtNodes.forEach((evt, j) => {
-            evt.x = colX[1];
-            evt.y = startY + j * spacing;
-            eventPositions[evt.id] = { x: evt.x, y: evt.y };
-        });
+        const eIds = userEvts[u.id] || [];
+        const eNodes = eIds.map(id => events.find(e => e.id === id)).filter(Boolean);
+        const spacing = Math.min(52, userH * 0.85);
+        const sy = u.y - ((eNodes.length - 1) * spacing) / 2;
+        eNodes.forEach((e, j) => { e.x = colX[1]; e.y = sy + j * spacing; });
     });
-    // Events not attached to any user (shouldn't happen, but safety)
-    events.filter(e => e.x === undefined).forEach((e, i) => {
-        e.x = colX[1]; e.y = 40 + i * 50;
-    });
+    events.filter(e => e.x == null).forEach((e, i) => { e.x = colX[1]; e.y = PAD_TOP + i * 50; });
 
-    // Position scopes: collect y positions from connected events, average them
-    const scopeYs = {};
+    // Scopes: average y from connected events
     scopes.forEach(s => {
-        const connectedEventIds = data.edges
-            .filter(e => e.relation === 'affects' && e.target === s.id)
-            .map(e => e.source);
-        const ys = connectedEventIds.map(id => {
-            const evt = events.find(e => e.id === id);
-            return evt ? evt.y : height / 2;
-        });
+        const cIds = data.edges.filter(e => e.relation === 'affects' && e.target === s.id).map(e => e.source);
+        const ys = cIds.map(id => { const ev = events.find(e => e.id === id); return ev ? ev.y : H / 2; });
         s.x = colX[2];
-        s.y = ys.length > 0 ? ys.reduce((a, b) => a + b) / ys.length : height / 2;
+        s.y = ys.length ? ys.reduce((a, b) => a + b) / ys.length : H / 2;
     });
-    // De-overlap scopes
+    // De-overlap
     scopes.sort((a, b) => a.y - b.y);
     for (let i = 1; i < scopes.length; i++) {
-        if (scopes[i].y - scopes[i - 1].y < 50) {
-            scopes[i].y = scopes[i - 1].y + 50;
-        }
+        if (scopes[i].y - scopes[i - 1].y < 48) scopes[i].y = scopes[i - 1].y + 48;
     }
-
-    // --- Column headers ---
-    svg.append('text').attr('x', colX[0]).attr('y', 24).attr('text-anchor', 'middle')
-       .attr('fill', '#484f58').attr('font-size', '12px').attr('font-weight', '600').text('AGENTS');
-    svg.append('text').attr('x', colX[1]).attr('y', 24).attr('text-anchor', 'middle')
-       .attr('fill', '#484f58').attr('font-size', '12px').attr('font-weight', '600').text('EVENTS');
-    svg.append('text').attr('x', colX[2]).attr('y', 24).attr('text-anchor', 'middle')
-       .attr('fill', '#484f58').attr('font-size', '12px').attr('font-weight', '600').text('SCOPES');
 
     const g = svg.append('g');
 
     // Zoom
-    svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', (e) => {
-        g.attr('transform', e.transform);
-    }));
-    svg.on('click', (e) => { if (e.target === svg.node()) dismissPopover(); });
+    svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', e => g.attr('transform', e.transform)));
+    svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
 
-    // --- Arrow marker ---
+    // Column headers
+    const headers = [
+        { x: colX[0], label: 'AGENTS', color: C.user },
+        { x: colX[1], label: 'EVENTS', color: C.accent },
+        { x: colX[2], label: 'SCOPES', color: C.scope },
+    ];
+    headers.forEach(h => {
+        g.append('text').attr('x', h.x).attr('y', 32)
+            .attr('text-anchor', 'middle').attr('fill', h.color)
+            .attr('font-size', '10px').attr('font-weight', '600')
+            .attr('letter-spacing', '2px').attr('opacity', 0.5)
+            .text(h.label);
+    });
+
+    // Arrows
     const defs = svg.append('defs');
-    defs.append('marker').attr('id', 'arr').attr('viewBox', '0 0 10 6')
-        .attr('refX', 10).attr('refY', 3).attr('markerWidth', 7).attr('markerHeight', 5)
-        .attr('orient', 'auto')
-        .append('path').attr('d', 'M0,0 L10,3 L0,6').attr('fill', '#484f58');
-    defs.append('marker').attr('id', 'arr-poly').attr('viewBox', '0 0 10 6')
-        .attr('refX', 10).attr('refY', 3).attr('markerWidth', 7).attr('markerHeight', 5)
-        .attr('orient', 'auto')
-        .append('path').attr('d', 'M0,0 L10,3 L0,6').attr('fill', '#f85149');
+    const mkArrow = (id, color) => {
+        defs.append('marker').attr('id', id).attr('viewBox', '0 0 8 6')
+            .attr('refX', 8).attr('refY', 3).attr('markerWidth', 6).attr('markerHeight', 5)
+            .attr('orient', 'auto')
+            .append('path').attr('d', 'M0,0.5 L7,3 L0,5.5').attr('fill', color);
+    };
+    mkArrow('a-default', '#1a2332');
+    mkArrow('a-poly', C.correction);
+    mkArrow('a-push', 'rgba(56,189,248,0.3)');
 
-    // --- Draw edges as curves ---
-    const linkGen = (sx, sy, tx, ty) => {
-        const mx = (sx + tx) / 2;
-        return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+    // --- Edges ---
+    const bezier = (sx, sy, tx, ty) => {
+        const cx = (sx + tx) / 2;
+        return `M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}`;
     };
 
-    const link = g.selectAll('.edge-path')
-        .data(data.edges)
-        .join('path')
+    const links = g.selectAll('.g-edge')
+        .data(data.edges).join('path')
+        .attr('class', 'g-edge')
         .attr('fill', 'none')
-        .attr('stroke-width', d => {
-            const tid = d.target;
-            return polyScopes.has(tid) ? 2.5 : 1.5;
+        .attr('d', d => {
+            const s = data.nodes.find(n => n.id === d.source);
+            const t = data.nodes.find(n => n.id === d.target);
+            return s && t ? bezier(s.x, s.y, t.x, t.y) : '';
         })
         .attr('stroke', d => {
-            const tid = d.target;
-            if (polyScopes.has(tid)) return '#f85149';
-            if (d.relation === 'pulled') return '#58a6ff';
-            return '#30363d';
+            if (polyScopes.has(d.target)) return C.correction;
+            if (d.relation === 'pushed') return 'rgba(56,189,248,0.25)';
+            return '#1a2332';
         })
-        .attr('stroke-dasharray', d => d.relation === 'pulled' ? '6,4' : '')
+        .attr('stroke-width', d => polyScopes.has(d.target) ? 2 : 1.2)
+        .attr('stroke-dasharray', d => d.relation === 'pulled' ? '4,3' : '')
         .attr('marker-end', d => {
-            const tid = d.target;
-            return polyScopes.has(tid) ? 'url(#arr-poly)' : 'url(#arr)';
+            if (polyScopes.has(d.target)) return 'url(#a-poly)';
+            if (d.relation === 'pushed') return 'url(#a-push)';
+            return 'url(#a-default)';
         })
-        .attr('d', d => {
-            const sn = data.nodes.find(n => n.id === d.source);
-            const tn = data.nodes.find(n => n.id === d.target);
-            if (!sn || !tn) return '';
-            return linkGen(sn.x, sn.y, tn.x, tn.y);
-        });
+        .attr('opacity', 0)
+        .transition().duration(500).delay((d, i) => 100 + i * 30).attr('opacity', 1);
 
-    // Edge labels
-    g.selectAll('.edge-label')
-        .data(data.edges)
-        .join('text')
-        .attr('class', 'edge-label')
-        .attr('text-anchor', 'middle')
-        .attr('fill', '#3d444d')
-        .attr('font-size', '9px')
-        .attr('x', d => {
-            const sn = data.nodes.find(n => n.id === d.source);
-            const tn = data.nodes.find(n => n.id === d.target);
-            return sn && tn ? (sn.x + tn.x) / 2 : 0;
-        })
-        .attr('y', d => {
-            const sn = data.nodes.find(n => n.id === d.source);
-            const tn = data.nodes.find(n => n.id === d.target);
-            return sn && tn ? (sn.y + tn.y) / 2 - 6 : 0;
-        })
-        .text(d => d.relation);
-
-    // --- Draw nodes ---
-    const colorMap = {
-        correction: '#f85149', decision: '#d29922', discovery: '#a371f7',
-        change: '#3fb950', broadcast: '#f778ba',
-    };
-
-    // User nodes
-    const userG = g.selectAll('.user-node')
+    // --- User nodes ---
+    const uG = g.selectAll('.g-user')
         .data(users).join('g')
-        .attr('class', 'node').attr('cursor', 'pointer')
-        .attr('transform', d => `translate(${d.x},${d.y})`);
-    userG.append('circle').attr('r', 18).attr('fill', '#58a6ff').attr('opacity', 0.15)
-         .attr('stroke', '#58a6ff').attr('stroke-width', 2);
-    userG.append('text').attr('text-anchor', 'middle').attr('dy', 5)
-         .attr('fill', '#58a6ff').attr('font-size', '12px').attr('font-weight', '600')
-         .text(d => (d.label || d.id).replace('user:', ''));
+        .attr('class', 'g-user').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`)
+        .attr('opacity', 0);
+    uG.transition().duration(400).delay((d, i) => i * 60).attr('opacity', 1);
 
-    // Event nodes
-    const evtG = g.selectAll('.event-node')
+    uG.append('circle').attr('r', 22)
+        .attr('fill', 'rgba(56,189,248,0.08)')
+        .attr('stroke', 'rgba(56,189,248,0.3)').attr('stroke-width', 1.5);
+    uG.append('circle').attr('r', 4).attr('fill', C.user);
+    uG.append('text').attr('dy', 38).attr('text-anchor', 'middle')
+        .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
+        .text(d => (d.label || d.id).replace('user:', ''));
+
+    // --- Event nodes ---
+    const eW = 200, eH = 40;
+    const eG = g.selectAll('.g-event')
         .data(events).join('g')
-        .attr('class', 'node').attr('cursor', 'pointer')
-        .attr('transform', d => `translate(${d.x},${d.y})`);
-    evtG.append('rect')
-        .attr('width', 180).attr('height', 36).attr('x', -90).attr('y', -18)
-        .attr('rx', 6)
-        .attr('fill', d => {
-            const c = colorMap[d.event_type] || '#3fb950';
-            return c + '22';  // low opacity fill
-        })
-        .attr('stroke', d => colorMap[d.event_type] || '#3fb950')
-        .attr('stroke-width', 1.5);
+        .attr('class', 'g-event').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`)
+        .attr('opacity', 0);
+    eG.transition().duration(400).delay((d, i) => 200 + i * 40).attr('opacity', 1);
+
+    eG.append('rect')
+        .attr('width', eW).attr('height', eH).attr('x', -eW / 2).attr('y', -eH / 2)
+        .attr('rx', 8)
+        .attr('fill', d => (C[d.event_type] || C.change) + '12')
+        .attr('stroke', d => (C[d.event_type] || C.change) + '40')
+        .attr('stroke-width', 1);
+
     // Type badge
-    evtG.append('rect')
-        .attr('width', d => d.event_type ? d.event_type.length * 6.5 + 8 : 40)
-        .attr('height', 14).attr('x', -87).attr('y', -14).attr('rx', 3)
-        .attr('fill', d => colorMap[d.event_type] || '#3fb950');
-    evtG.append('text').attr('x', -83).attr('y', -4)
-        .attr('fill', '#fff').attr('font-size', '9px').attr('font-weight', '600')
-        .text(d => d.event_type || 'event');
-    // Result text
-    evtG.append('text').attr('x', -83).attr('y', 12)
-        .attr('fill', '#c9d1d9').attr('font-size', '10px')
+    eG.append('rect')
+        .attr('x', -eW / 2 + 6).attr('y', -eH / 2 + 5)
+        .attr('width', d => (d.event_type || 'evt').length * 6 + 10).attr('height', 14)
+        .attr('rx', 4)
+        .attr('fill', d => C[d.event_type] || C.change);
+    eG.append('text')
+        .attr('x', -eW / 2 + 11).attr('y', -eH / 2 + 14)
+        .attr('fill', '#06080c').attr('font-size', '8px').attr('font-weight', '700')
+        .attr('letter-spacing', '0.5px')
+        .text(d => (d.event_type || 'event').toUpperCase());
+
+    // Result
+    eG.append('text')
+        .attr('x', -eW / 2 + 8).attr('y', eH / 2 - 8)
+        .attr('fill', '#c8d6e5').attr('font-size', '10px')
         .text(d => {
-            const label = d.label || d.id;
-            return label.length > 28 ? label.substring(0, 28) + '...' : label;
+            const t = d.label || d.id;
+            return t.length > 30 ? t.substring(0, 30) + '...' : t;
         });
 
-    // Scope nodes
-    const scopeG = g.selectAll('.scope-node')
+    // --- Scope nodes ---
+    const sG = g.selectAll('.g-scope')
         .data(scopes).join('g')
-        .attr('class', 'node').attr('cursor', 'pointer')
-        .attr('transform', d => `translate(${d.x},${d.y})`);
-    scopeG.append('rect')
-        .attr('width', 120).attr('height', 30).attr('x', -60).attr('y', -15)
-        .attr('rx', 15)
-        .attr('fill', d => polyScopes.has(d.id) ? '#f8514922' : '#161b22')
-        .attr('stroke', d => polyScopes.has(d.id) ? '#f85149' : '#30363d')
-        .attr('stroke-width', d => polyScopes.has(d.id) ? 2 : 1);
-    scopeG.append('text').attr('text-anchor', 'middle').attr('dy', 4)
-        .attr('fill', d => polyScopes.has(d.id) ? '#f85149' : '#8b949e')
-        .attr('font-size', '11px').attr('font-weight', d => polyScopes.has(d.id) ? '600' : '400')
+        .attr('class', 'g-scope').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`)
+        .attr('opacity', 0);
+    sG.transition().duration(400).delay((d, i) => 400 + i * 50).attr('opacity', 1);
+
+    const sW = 140, sH = 32;
+    sG.append('rect')
+        .attr('width', sW).attr('height', sH).attr('x', -sW / 2).attr('y', -sH / 2)
+        .attr('rx', sH / 2)
+        .attr('fill', d => polyScopes.has(d.id) ? 'rgba(255,71,87,0.1)' : 'rgba(90,106,126,0.08)')
+        .attr('stroke', d => polyScopes.has(d.id) ? C.correction : '#1a2332')
+        .attr('stroke-width', d => polyScopes.has(d.id) ? 1.5 : 1);
+
+    sG.append('text').attr('text-anchor', 'middle').attr('dy', 4)
+        .attr('fill', d => polyScopes.has(d.id) ? C.correction : '#5a6a7e')
+        .attr('font-size', '10px')
+        .attr('font-weight', d => polyScopes.has(d.id) ? '600' : '400')
         .text(d => (d.label || d.id).replace('scope:', ''));
-    // Polymorphism warning icon
-    scopes.filter(s => polyScopes.has(s.id)).forEach(s => {
-        const sg = scopeG.filter(d => d.id === s.id);
-        sg.append('text').attr('x', 48).attr('y', -8)
-           .attr('fill', '#f85149').attr('font-size', '14px').text('\u26A0');
-    });
 
-    // --- Click handler: popover + focus ---
-    const allNodeGroups = g.selectAll('.node');
-    allNodeGroups.on('click', (e, d) => {
-        e.stopPropagation();
+    // Poly warning
+    sG.filter(d => polyScopes.has(d.id))
+        .append('text').attr('x', sW / 2 - 8).attr('y', -sH / 2 - 4)
+        .attr('fill', C.correction).attr('font-size', '12px').text('\u26A0');
 
-        // Highlight connected
-        const connectedIds = new Set([d.id]);
-        data.edges.forEach(edge => {
-            if (edge.source === d.id || edge.target === d.id) {
-                connectedIds.add(edge.source);
-                connectedIds.add(edge.target);
-            }
+    // --- Click: highlight subgraph + popover ---
+    const allNodes = g.selectAll('.g-user, .g-event, .g-scope');
+    allNodes.on('click', (ev, d) => {
+        ev.stopPropagation();
+        const conn = new Set([d.id]);
+        data.edges.forEach(e => {
+            if (e.source === d.id || e.target === d.id) { conn.add(e.source); conn.add(e.target); }
         });
+        allNodes.transition().duration(200).attr('opacity', n => conn.has(n.id) ? 1 : 0.1);
+        g.selectAll('.g-edge').transition().duration(200)
+            .attr('opacity', e => (e.source === d.id || e.target === d.id) ? 1 : 0.04);
 
-        allNodeGroups.attr('opacity', n => connectedIds.has(n.id) ? 1 : 0.15);
-        link.attr('opacity', edge => (edge.source === d.id || edge.target === d.id) ? 1 : 0.08);
-
-        showPopover(d, e, data);
+        showPopover(d, ev, data);
     });
 
-    // --- Legend (bottom-left) ---
-    const legend = svg.append('g').attr('transform', `translate(16, ${height - 100})`);
+    // --- Legend ---
+    const lg = svg.append('g').attr('transform', `translate(20, ${H - 36})`);
     const items = [
-        { color: '#58a6ff', label: 'Agent' },
-        { color: '#f85149', label: 'Correction' },
-        { color: '#d29922', label: 'Decision' },
-        { color: '#a371f7', label: 'Discovery' },
-        { color: '#f778ba', label: 'Broadcast' },
+        { c: C.user, l: 'Agent' }, { c: C.correction, l: 'Correction' },
+        { c: C.decision, l: 'Decision' }, { c: C.discovery, l: 'Discovery' },
+        { c: C.broadcast, l: 'Broadcast' },
     ];
-    items.forEach((item, i) => {
-        const x = i * 100;
-        legend.append('rect').attr('x', x).attr('y', 0).attr('width', 10).attr('height', 10)
-              .attr('rx', item.color === '#58a6ff' ? 5 : 2).attr('fill', item.color);
-        legend.append('text').attr('x', x + 14).attr('y', 9)
-              .attr('fill', '#8b949e').attr('font-size', '10px').text(item.label);
+    items.forEach((it, i) => {
+        const x = i * 96;
+        lg.append('circle').attr('cx', x + 5).attr('cy', 0).attr('r', 4).attr('fill', it.c);
+        lg.append('text').attr('x', x + 14).attr('y', 4)
+            .attr('fill', '#364152').attr('font-size', '10px').text(it.l);
     });
-    legend.append('line').attr('x1', 0).attr('y1', 22).attr('x2', 20).attr('y2', 22)
-          .attr('stroke', '#f85149').attr('stroke-width', 2);
-    legend.append('text').attr('x', 24).attr('y', 26)
-          .attr('fill', '#8b949e').attr('font-size', '10px').text('= polymorphism conflict');
+}
 
-    function showPopover(d, event, graphData) {
-        dismissPopover();
-        const popover = document.createElement('div');
-        popover.id = 'graph-popover';
-
-        const name = (d.label || d.id).replace(/^(user|event|scope):/, '');
-        let html = `<div class="popover-header">${d.type.toUpperCase()}: ${name}</div>`;
-
-        if (d.type === 'event' && d.data) {
-            if (d.data.result) html += `<div class="popover-row"><b>Result:</b> ${d.data.result}</div>`;
-            if (d.data.process && d.data.process.length) {
-                html += `<div class="popover-row"><b>Process:</b></div>`;
-                d.data.process.forEach(p => { html += `<div class="popover-step">&rarr; ${p}</div>`; });
-            }
-            if (d.data.ts) html += `<div class="popover-row muted">${new Date(d.data.ts).toLocaleString()}</div>`;
-        } else if (d.type === 'user') {
-            const evtCount = (userEvents[d.id] || []).length;
-            html += `<div class="popover-row">Pushed ${evtCount} event(s)</div>`;
-        } else if (d.type === 'scope') {
-            const poly = graphData.polymorphisms.find(p => p.scope === (d.label || d.id));
-            if (!poly) {
-                // Also try with scope: prefix stripped
-                const scopeLabel = (d.label || d.id).replace('scope:', '');
-                const poly2 = graphData.polymorphisms.find(p => p.scope === scopeLabel);
-                if (poly2) {
-                    html += `<div class="popover-row popover-warn">Polymorphism detected!</div>`;
-                    html += `<div class="popover-row">Users: ${poly2.users.join(', ')}</div>`;
-                    poly2.intents.forEach(i => { html += `<div class="popover-step">&bull; ${i}</div>`; });
-                }
-            } else {
-                html += `<div class="popover-row popover-warn">Polymorphism detected!</div>`;
-                html += `<div class="popover-row">Users: ${poly.users.join(', ')}</div>`;
-                poly.intents.forEach(i => { html += `<div class="popover-step">&bull; ${i}</div>`; });
-            }
-        }
-
-        popover.innerHTML = html;
-        container.appendChild(popover);
-
-        const rect = container.getBoundingClientRect();
-        let left = event.clientX - rect.left + 16;
-        let top = event.clientY - rect.top - 10;
-        const pw = 320, ph = popover.offsetHeight || 200;
-        if (left + pw > rect.width) left = left - pw - 32;
-        if (top + ph > rect.height) top = rect.height - ph - 8;
-        if (top < 0) top = 8;
-        popover.style.left = left + 'px';
-        popover.style.top = top + 'px';
+// ============================================================
+// TIMELINE — Swimlane
+// ============================================================
+async function loadTimelineData() {
+    const res = await fetch(`${API}/api/report/timeline?repo_id=${enc(currentRepo)}`);
+    timelineData = await res.json();
+    if (document.getElementById('timeline').classList.contains('active')) {
+        renderTimeline(timelineData);
     }
-}
-
-function dismissPopover() {
-    const existing = document.getElementById('graph-popover');
-    if (existing) existing.remove();
-    // Reset opacity
-    d3.selectAll('.node').attr('opacity', 1);
-    d3.selectAll('.edge').attr('opacity', 1);
-}
-
-// --- Timeline ---
-async function loadTimeline() {
-    const res = await fetch(`${API_BASE}/api/report/timeline?repo_id=${encodeURIComponent(currentRepo)}`);
-    const data = await res.json();
-    renderTimeline(data);
 }
 
 function renderTimeline(data) {
+    if (!data) return;
     const svg = d3.select('#timeline-svg');
     svg.selectAll('*').remove();
+    dismissPopover();
 
     const users = Object.keys(data.swimlanes);
-    if (users.length === 0) return;
+    if (!users.length) return;
 
-    const laneHeight = 80;
-    const margin = { top: 40, right: 40, bottom: 40, left: 120 };
-    const width = Math.max(800, document.getElementById('timeline-container').clientWidth || 900);
-    const height = margin.top + users.length * laneHeight + margin.bottom;
-    svg.attr('viewBox', `0 0 ${width} ${height}`);
+    const laneH = 72;
+    const margin = { top: 48, right: 40, bottom: 44, left: 110 };
+    const ctr = document.getElementById('timeline-container');
+    const W = Math.max(800, ctr.clientWidth || 900);
+    const H = margin.top + users.length * laneH + margin.bottom;
+    svg.attr('viewBox', `0 0 ${W} ${H}`).attr('width', W).attr('height', H);
 
-    // Collect all timestamps
-    const allEvents = users.flatMap(u => data.swimlanes[u]);
-    if (allEvents.length === 0) return;
+    const allEvts = users.flatMap(u => data.swimlanes[u]);
+    if (!allEvts.length) return;
 
-    const extent = d3.extent(allEvents, d => new Date(d.ts));
-    const x = d3.scaleTime().domain(extent).range([margin.left, width - margin.right]).nice();
-    const y = d3.scaleBand().domain(users).range([margin.top, height - margin.bottom]).padding(0.2);
+    const ext = d3.extent(allEvts, d => new Date(d.ts));
+    // Add padding to time extent
+    const pad = (ext[1] - ext[0]) * 0.08 || 3600000;
+    const x = d3.scaleTime()
+        .domain([new Date(ext[0] - pad), new Date(+ext[1] + pad)])
+        .range([margin.left, W - margin.right]);
+    const y = d3.scaleBand().domain(users).range([margin.top, H - margin.bottom]).padding(0.15);
 
-    // Swimlane backgrounds
-    svg.selectAll('.swimlane-bg')
-        .data(users)
-        .join('rect')
-        .attr('class', 'swimlane-bg')
-        .attr('x', 0).attr('width', width)
+    // Swimlane bg
+    svg.selectAll('.lane-bg')
+        .data(users).join('rect')
+        .attr('x', 0).attr('width', W)
         .attr('y', d => y(d)).attr('height', y.bandwidth())
-        .attr('fill', (d, i) => i % 2 === 0 ? '#161b22' : '#0d1117');
+        .attr('fill', (d, i) => i % 2 ? 'rgba(17,24,34,0.4)' : 'transparent')
+        .attr('rx', 0);
 
     // Swimlane labels
-    svg.selectAll('.swimlane-label')
-        .data(users)
-        .join('text')
-        .attr('class', 'swimlane-label')
-        .attr('x', 12)
-        .attr('y', d => y(d) + y.bandwidth() / 2 + 5)
+    svg.selectAll('.lane-label')
+        .data(users).join('text')
+        .attr('x', 16).attr('y', d => y(d) + y.bandwidth() / 2 + 4)
+        .attr('fill', C.user).attr('font-size', '12px').attr('font-weight', '600')
         .text(d => d);
 
-    const colorMap = {
-        correction: '#f85149', decision: '#d29922', discovery: '#a371f7',
-        change: '#3fb950', broadcast: '#f778ba',
-    };
+    // Grid lines
+    const ticks = x.ticks(8);
+    svg.selectAll('.grid-line')
+        .data(ticks).join('line')
+        .attr('x1', d => x(d)).attr('x2', d => x(d))
+        .attr('y1', margin.top).attr('y2', H - margin.bottom)
+        .attr('stroke', '#111822').attr('stroke-width', 1);
+
+    // Broadcast lines
+    allEvts.filter(e => e.type === 'broadcast').forEach(evt => {
+        const bx = x(new Date(evt.ts));
+        svg.append('line')
+            .attr('x1', bx).attr('x2', bx)
+            .attr('y1', margin.top).attr('y2', H - margin.bottom)
+            .attr('stroke', C.broadcast).attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '6,4').attr('opacity', 0.5);
+        svg.append('text')
+            .attr('x', bx + 6).attr('y', margin.top - 6)
+            .attr('fill', C.broadcast).attr('font-size', '9px')
+            .text('BROADCAST');
+    });
 
     // Events
-    for (const user of users) {
-        const events = data.swimlanes[user];
-        svg.selectAll(`.evt-${user.replace(/\W/g, '_')}`)
-            .data(events)
-            .join('circle')
-            .attr('class', 'timeline-event')
-            .attr('cx', d => x(new Date(d.ts)))
-            .attr('cy', y(user) + y.bandwidth() / 2)
-            .attr('r', 6)
-            .attr('fill', d => colorMap[d.type] || '#8b949e')
-            .on('click', (e, d) => {
-                const panel = document.getElementById('detail-panel');
-                panel.classList.remove('hidden');
-                document.getElementById('detail-content').textContent = JSON.stringify(d, null, 2);
-            });
+    users.forEach(user => {
+        const evts = data.swimlanes[user];
+        const dots = svg.selectAll(`.dot-${user.replace(/\W/g, '_')}`)
+            .data(evts).join('g')
+            .attr('class', 'tl-dot')
+            .attr('cursor', 'pointer')
+            .attr('transform', d => `translate(${x(new Date(d.ts))},${y(user) + y.bandwidth() / 2})`);
 
-        // Broadcast vertical lines
-        events.filter(e => e.type === 'broadcast').forEach(evt => {
-            svg.append('line')
-                .attr('class', 'timeline-broadcast-line')
-                .attr('x1', x(new Date(evt.ts))).attr('x2', x(new Date(evt.ts)))
-                .attr('y1', margin.top).attr('y2', height - margin.bottom);
+        // Outer ring
+        dots.append('circle').attr('r', 14)
+            .attr('fill', d => (C[d.type] || C.change) + '15')
+            .attr('stroke', d => (C[d.type] || C.change) + '30')
+            .attr('stroke-width', 1);
+        // Inner dot
+        dots.append('circle').attr('r', 5)
+            .attr('fill', d => C[d.type] || C.change);
+        // Label
+        dots.append('text')
+            .attr('dy', 26).attr('text-anchor', 'middle')
+            .attr('fill', '#5a6a7e').attr('font-size', '9px')
+            .text(d => d.result.substring(0, 18) + (d.result.length > 18 ? '..' : ''));
+
+        // Click
+        dots.on('click', (ev, d) => {
+            ev.stopPropagation();
+            showPopover({
+                type: 'event', label: d.result, event_type: d.type,
+                data: { result: d.result, process: d.process, ts: d.ts },
+            }, ev, null);
         });
-    }
+    });
 
     // X axis
     svg.append('g')
-        .attr('transform', `translate(0,${height - margin.bottom})`)
-        .call(d3.axisBottom(x).ticks(8))
-        .selectAll('text').attr('fill', '#8b949e');
+        .attr('transform', `translate(0,${H - margin.bottom})`)
+        .call(d3.axisBottom(x).ticks(8).tickSize(0).tickPadding(10))
+        .call(g => g.select('.domain').attr('stroke', '#1a2332'))
+        .selectAll('text').attr('fill', '#364152').attr('font-size', '10px');
+}
 
-    svg.selectAll('.domain, .tick line').attr('stroke', '#30363d');
+// ============================================================
+// POPOVER
+// ============================================================
+function showPopover(d, event, graphData) {
+    dismissPopover();
+    const pop = document.getElementById('graph-popover');
+    pop.classList.remove('hidden');
+
+    const name = (d.label || d.id || '').replace(/^(user|event|scope):/, '');
+    let html = `<div class="popover-header">${(d.type || '').toUpperCase()}: ${esc(name)}</div>`;
+
+    if (d.type === 'event' && d.data) {
+        if (d.data.result) html += `<div class="popover-row"><b>Result:</b> ${esc(d.data.result)}</div>`;
+        if (d.data.process && d.data.process.length) {
+            html += `<div class="popover-row"><b>Process:</b></div>`;
+            d.data.process.forEach(p => { html += `<div class="popover-step">&rarr; ${esc(p)}</div>`; });
+        }
+        if (d.data.ts) html += `<div class="popover-row muted">${new Date(d.data.ts).toLocaleString()}</div>`;
+    } else if (d.type === 'scope' && graphData) {
+        const scopeLabel = (d.label || d.id || '').replace('scope:', '');
+        const poly = graphData.polymorphisms.find(p => p.scope === scopeLabel || p.scope === d.id);
+        if (poly) {
+            html += `<div class="popover-row popover-warn">POLYMORPHISM DETECTED</div>`;
+            html += `<div class="popover-row">Agents: ${poly.users.join(', ')}</div>`;
+            poly.intents.forEach(i => { html += `<div class="popover-step">&bull; ${esc(i)}</div>`; });
+        }
+    } else if (d.type === 'user') {
+        html += `<div class="popover-row">Agent node</div>`;
+    }
+
+    pop.innerHTML = html;
+
+    // Position
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = event.clientX + 16;
+    let top = event.clientY - 10;
+    const pw = 340;
+    if (left + pw > vw - 16) left = event.clientX - pw - 16;
+    if (top + 200 > vh) top = vh - 220;
+    if (top < 8) top = 8;
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+}
+
+function dismissPopover() {
+    const pop = document.getElementById('graph-popover');
+    if (pop) pop.classList.add('hidden');
+    // Reset all opacities
+    d3.selectAll('.g-user, .g-event, .g-scope').transition().duration(200).attr('opacity', 1);
+    d3.selectAll('.g-edge').transition().duration(200).attr('opacity', 1);
+}
+
+// Dismiss on click outside
+document.addEventListener('click', e => {
+    const pop = document.getElementById('graph-popover');
+    if (pop && !pop.contains(e.target)) dismissPopover();
+});
+
+// ============================================================
+// UTILS
+// ============================================================
+function enc(s) { return encodeURIComponent(s); }
+function esc(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
 }

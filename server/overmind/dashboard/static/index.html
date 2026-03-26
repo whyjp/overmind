@@ -3,66 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Overmind Dashboard</title>
+    <title>Overmind</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sunn-us/SUIT/fonts/variable/woff2/SUIT-Variable.css">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
+    <!-- Animated background grain -->
+    <div class="bg-grain"></div>
+    <div class="bg-glow bg-glow--1"></div>
+    <div class="bg-glow bg-glow--2"></div>
+
     <header>
-        <h1>Overmind</h1>
-        <div id="repo-selector">
-            <label for="repo-id">Repo:</label>
-            <select id="repo-id" onchange="loadAll()">
-                <option value="">-- select repo --</option>
-            </select>
+        <div class="header-left">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="14" stroke="var(--accent)" stroke-width="1.5" opacity="0.4"/>
+                        <circle cx="16" cy="16" r="8" stroke="var(--accent)" stroke-width="1.5"/>
+                        <circle cx="16" cy="16" r="3" fill="var(--accent)"/>
+                        <line x1="16" y1="2" x2="16" y2="8" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>
+                        <line x1="16" y1="24" x2="16" y2="30" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>
+                        <line x1="2" y1="16" x2="8" y2="16" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>
+                        <line x1="24" y1="16" x2="30" y2="16" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>
+                    </svg>
+                </div>
+                <span class="logo-text">OVERMIND</span>
+                <span class="logo-tag">HIVE SYNC</span>
+            </div>
         </div>
-        <nav>
-            <button class="tab active" data-tab="overview">Overview</button>
-            <button class="tab" data-tab="graph">Graph</button>
-            <button class="tab" data-tab="timeline">Timeline</button>
+        <div class="header-center">
+            <div class="repo-selector">
+                <div class="repo-selector-icon">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+                        <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9z"/>
+                    </svg>
+                </div>
+                <select id="repo-id" onchange="loadAll()">
+                    <option value="">select repository</option>
+                </select>
+            </div>
+        </div>
+        <nav class="header-right">
+            <button class="tab active" data-tab="overview">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M0 1.75A.75.75 0 01.75 1h14.5a.75.75 0 010 1.5H.75A.75.75 0 010 1.75zM0 8a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H.75A.75.75 0 010 8zm.75 5.5a.75.75 0 000 1.5h14.5a.75.75 0 000-1.5H.75z"/></svg>
+                Overview
+            </button>
+            <button class="tab" data-tab="graph">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.5 1.75V13.5h13.75a.75.75 0 010 1.5H.75a.75.75 0 01-.75-.75V1.75a.75.75 0 011.5 0zm14.28 2.53a.75.75 0 00-1.06-1.06L10 7.94 7.53 5.47a.75.75 0 00-1.06 0L3.22 8.72a.75.75 0 001.06 1.06L7 7.06l2.47 2.47a.75.75 0 001.06 0l5.25-5.25z"/></svg>
+                Graph
+            </button>
+            <button class="tab" data-tab="timeline">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 0a8 8 0 110 16A8 8 0 018 0zm.5 4.75a.75.75 0 00-1.5 0v3.5a.75.75 0 00.37.65l2.5 1.5a.75.75 0 10.76-1.3L8.5 7.87V4.75z"/></svg>
+                Timeline
+            </button>
         </nav>
     </header>
 
     <main>
+        <!-- OVERVIEW -->
         <section id="overview" class="tab-content active">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-pushes">-</div>
-                    <div class="stat-label">Total Pushes</div>
+            <div class="overview-grid">
+                <div class="stat-card" style="--delay: 0">
+                    <div class="stat-icon stat-icon--push">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/></svg>
+                    </div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="stat-pushes">-</div>
+                        <div class="stat-label">Pushes</div>
+                    </div>
+                    <div class="stat-bar stat-bar--push"></div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-pulls">-</div>
-                    <div class="stat-label">Total Pulls</div>
+                <div class="stat-card" style="--delay: 1">
+                    <div class="stat-icon stat-icon--pull">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+                    </div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="stat-pulls">-</div>
+                        <div class="stat-label">Pulls</div>
+                    </div>
+                    <div class="stat-bar stat-bar--pull"></div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-users">-</div>
-                    <div class="stat-label">Active Users</div>
+                <div class="stat-card" style="--delay: 2">
+                    <div class="stat-icon stat-icon--users">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+                    </div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="stat-users">-</div>
+                        <div class="stat-label">Agents</div>
+                    </div>
+                    <div class="stat-bar stat-bar--users"></div>
+                </div>
+                <div class="stat-card stat-card--wide" style="--delay: 3">
+                    <div class="stat-card-header">Event Distribution</div>
+                    <div id="type-chart"></div>
                 </div>
             </div>
-            <div id="type-chart"></div>
-            <div id="recent-events">
-                <h3>Recent Events</h3>
-                <table id="events-table">
-                    <thead>
-                        <tr><th>Time</th><th>User</th><th>Type</th><th>Result</th></tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+
+            <div class="events-section">
+                <div class="section-header">
+                    <h3>Event Feed</h3>
+                    <span class="section-badge" id="event-count">0 events</span>
+                </div>
+                <div class="events-list" id="events-list"></div>
             </div>
         </section>
 
+        <!-- GRAPH -->
         <section id="graph" class="tab-content">
             <div id="graph-container">
                 <svg id="graph-svg"></svg>
             </div>
         </section>
 
+        <!-- TIMELINE -->
         <section id="timeline" class="tab-content">
             <div id="timeline-container">
                 <svg id="timeline-svg"></svg>
             </div>
         </section>
     </main>
+
+    <!-- Floating popover (shared) -->
+    <div id="graph-popover" class="popover hidden"></div>
 
     <script src="app.js"></script>
 </body>
