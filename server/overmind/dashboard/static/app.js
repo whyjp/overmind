@@ -162,6 +162,10 @@ function renderGraph(data) {
     svg.selectAll('*').remove();
     dismissPopover();
 
+    // Scope filter panel
+    const filterPanel = document.getElementById('graph-scope-filter');
+    filterPanel.innerHTML = '';
+
     const container = document.getElementById('graph-container');
     const W = container.clientWidth || 900;
     const H = container.clientHeight || 600;
@@ -178,34 +182,59 @@ function renderGraph(data) {
     const polyScopes = new Set(data.polymorphisms.map(p => p.scope));
 
     const users  = data.nodes.filter(n => n.type === 'user');
-    const events = data.nodes.filter(n => n.type === 'event');
+    const origEvents = data.nodes.filter(n => n.type === 'event' && !(n.data && n.data.ghost));
+    const ghostEvents = data.nodes.filter(n => n.type === 'event' && n.data && n.data.ghost);
+    const allEvents = data.nodes.filter(n => n.type === 'event');
     const scopes = data.nodes.filter(n => n.type === 'scope');
 
     // Build adjacency
-    const userEvts = {}, evtScps = {};
+    const userEvts = {}, userGhosts = {}, evtScps = {};
     data.edges.forEach(e => {
-        if (e.relation === 'pushed')  (userEvts[e.source] = userEvts[e.source] || []).push(e.target);
-        if (e.relation === 'affects') (evtScps[e.source] = evtScps[e.source] || []).push(e.target);
+        if (e.relation === 'pushed')   (userEvts[e.source] = userEvts[e.source] || []).push(e.target);
+        if (e.relation === 'consumed') (userGhosts[e.source] = userGhosts[e.source] || []).push(e.target);
+        if (e.relation === 'affects')  (evtScps[e.source] = evtScps[e.source] || []).push(e.target);
     });
 
     // --- Layout ---
     const colX = [130, W * 0.40, W * 0.78];
     const PAD_TOP = 60;
 
-    // Users
-    const userH = Math.min(90, (H - PAD_TOP * 2) / Math.max(users.length, 1));
-    const userStartY = PAD_TOP + (H - PAD_TOP * 2 - (users.length - 1) * userH) / 2;
-    users.forEach((u, i) => { u.x = colX[0]; u.y = userStartY + i * userH; });
+    // Count total event cards per user (pushed + ghosts) to compute spacing
+    const userCardCounts = {};
+    users.forEach(u => {
+        const pushed = (userEvts[u.id] || []).length;
+        const ghosts = (userGhosts[u.id] || []).length;
+        userCardCounts[u.id] = pushed + ghosts;
+    });
+    const maxCards = Math.max(...Object.values(userCardCounts), 1);
 
-    // Events: group by user
+    // Users: space them based on how many cards they have
+    const cardH = 48;
+    let yOffset = PAD_TOP;
+    users.forEach(u => {
+        const totalCards = userCardCounts[u.id] || 1;
+        const blockH = totalCards * cardH;
+        u.y = yOffset + blockH / 2;
+        u._blockStart = yOffset;
+        u._blockEnd = yOffset + blockH;
+        yOffset += blockH + 24; // gap between user blocks
+    });
+
+    // Events: position pushed events under their user
     users.forEach(u => {
         const eIds = userEvts[u.id] || [];
-        const eNodes = eIds.map(id => events.find(e => e.id === id)).filter(Boolean);
-        const spacing = Math.min(52, userH * 0.85);
-        const sy = u.y - ((eNodes.length - 1) * spacing) / 2;
-        eNodes.forEach((e, j) => { e.x = colX[1]; e.y = sy + j * spacing; });
+        const eNodes = eIds.map(id => origEvents.find(e => e.id === id)).filter(Boolean);
+        const gIds = userGhosts[u.id] || [];
+        const gNodes = gIds.map(id => ghostEvents.find(e => e.id === id)).filter(Boolean);
+        const allCards = [...eNodes, ...gNodes];
+        const startY = u._blockStart;
+        allCards.forEach((e, j) => {
+            e.x = colX[1];
+            e.y = startY + j * cardH + cardH / 2;
+        });
     });
-    events.filter(e => e.x == null).forEach((e, i) => { e.x = colX[1]; e.y = PAD_TOP + i * 50; });
+    // Orphan events
+    allEvents.filter(e => e.x == null).forEach((e, i) => { e.x = colX[1]; e.y = PAD_TOP + i * 50; });
 
     // Scopes: average y from connected events
     scopes.forEach(s => {
@@ -226,11 +255,10 @@ function renderGraph(data) {
     svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', e => g.attr('transform', e.transform)));
     svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
 
-    // Column headers
+    // Column headers (2-column: Agents | Events)
     const headers = [
         { x: colX[0], label: 'AGENTS', color: C.user },
         { x: colX[1], label: 'EVENTS', color: C.accent },
-        { x: colX[2], label: 'SCOPES', color: C.scope },
     ];
     headers.forEach(h => {
         g.append('text').attr('x', h.x).attr('y', 32)
@@ -259,8 +287,11 @@ function renderGraph(data) {
         return `M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}`;
     };
 
+    // Filter: only show pushed, pulled, consumed edges (not affects — scope shown inline)
+    const visibleEdges = data.edges.filter(e => e.relation !== 'affects');
+
     const links = g.selectAll('.g-edge')
-        .data(data.edges).join('path')
+        .data(visibleEdges).join('path')
         .attr('class', 'g-edge')
         .attr('fill', 'none')
         .attr('d', d => {
@@ -269,19 +300,18 @@ function renderGraph(data) {
             return s && t ? bezier(s.x, s.y, t.x, t.y) : '';
         })
         .attr('stroke', d => {
-            if (d.relation === 'pulled') return 'rgba(0,229,160,0.35)';
-            if (polyScopes.has(d.target)) return C.correction;
+            if (d.relation === 'pulled') return 'rgba(0,229,160,0.30)';
+            if (d.relation === 'consumed') return 'rgba(0,229,160,0.15)';
             if (d.relation === 'pushed') return 'rgba(56,189,248,0.25)';
             return '#1a2332';
         })
         .attr('stroke-width', d => {
             if (d.relation === 'pulled') return 1.5;
-            return polyScopes.has(d.target) ? 2 : 1.2;
+            return 1.2;
         })
-        .attr('stroke-dasharray', d => d.relation === 'pulled' ? '6,4' : '')
+        .attr('stroke-dasharray', d => (d.relation === 'pulled' || d.relation === 'consumed') ? '6,4' : '')
         .attr('marker-end', d => {
-            if (d.relation === 'pulled') return 'url(#a-pull)';
-            if (polyScopes.has(d.target)) return 'url(#a-poly)';
+            if (d.relation === 'pulled' || d.relation === 'consumed') return 'url(#a-pull)';
             if (d.relation === 'pushed') return 'url(#a-push)';
             return 'url(#a-default)';
         })
@@ -307,18 +337,20 @@ function renderGraph(data) {
     // --- Event nodes ---
     const eW = 200, eH = 40;
     const eG = g.selectAll('.g-event')
-        .data(events).join('g')
+        .data(allEvents).join('g')
         .attr('class', 'g-event').attr('cursor', 'pointer')
         .attr('transform', d => `translate(${d.x},${d.y})`)
         .attr('opacity', 0);
     eG.transition().duration(400).delay((d, i) => 200 + i * 40).attr('opacity', 1);
 
+    const isGhost = d => d.data && d.data.ghost;
     eG.append('rect')
         .attr('width', eW).attr('height', eH).attr('x', -eW / 2).attr('y', -eH / 2)
         .attr('rx', 8)
-        .attr('fill', d => (C[d.event_type] || C.change) + '12')
-        .attr('stroke', d => (C[d.event_type] || C.change) + '40')
-        .attr('stroke-width', 1);
+        .attr('fill', d => isGhost(d) ? 'rgba(0,229,160,0.04)' : (C[d.event_type] || C.change) + '12')
+        .attr('stroke', d => isGhost(d) ? 'rgba(0,229,160,0.20)' : (C[d.event_type] || C.change) + '40')
+        .attr('stroke-width', d => isGhost(d) ? 1 : 1)
+        .attr('stroke-dasharray', d => isGhost(d) ? '4,3' : '');
 
     // Type badge
     eG.append('rect')
@@ -332,41 +364,53 @@ function renderGraph(data) {
         .attr('letter-spacing', '0.5px')
         .text(d => (d.event_type || 'event').toUpperCase());
 
-    // Result
+    // Result text
     eG.append('text')
-        .attr('x', -eW / 2 + 8).attr('y', eH / 2 - 8)
-        .attr('fill', '#c8d6e5').attr('font-size', '10px')
+        .attr('x', -eW / 2 + 8).attr('y', eH / 2 - 10)
+        .attr('fill', d => isGhost(d) ? '#5a6a7e' : '#c8d6e5')
+        .attr('font-size', '10px')
         .text(d => {
             const t = d.label || d.id;
-            return t.length > 30 ? t.substring(0, 30) + '...' : t;
+            return t.length > 28 ? t.substring(0, 28) + '...' : t;
         });
 
-    // --- Scope nodes ---
-    const sG = g.selectAll('.g-scope')
-        .data(scopes).join('g')
-        .attr('class', 'g-scope').attr('cursor', 'pointer')
-        .attr('transform', d => `translate(${d.x},${d.y})`)
-        .attr('opacity', 0);
-    sG.transition().duration(400).delay((d, i) => 400 + i * 50).attr('opacity', 1);
+    // Scope tags inline — build event→scopes lookup from edges
+    const evtScopeLabels = {};
+    data.edges.forEach(e => {
+        if (e.relation === 'affects') {
+            const scopeNode = scopes.find(s => s.id === e.target);
+            const label = scopeNode ? (scopeNode.label || scopeNode.id).replace('scope:', '') : '';
+            if (label && label !== '*') {
+                (evtScopeLabels[e.source] = evtScopeLabels[e.source] || []).push(label);
+            }
+        }
+    });
 
-    const sW = 140, sH = 32;
-    sG.append('rect')
-        .attr('width', sW).attr('height', sH).attr('x', -sW / 2).attr('y', -sH / 2)
-        .attr('rx', sH / 2)
-        .attr('fill', d => polyScopes.has(d.id) ? 'rgba(255,71,87,0.1)' : 'rgba(90,106,126,0.08)')
-        .attr('stroke', d => polyScopes.has(d.id) ? C.correction : '#1a2332')
-        .attr('stroke-width', d => polyScopes.has(d.id) ? 1.5 : 1);
+    // Render scope tags at bottom-right of each event card
+    eG.each(function(d) {
+        const scopeList = evtScopeLabels[d.id] || [];
+        if (!scopeList.length) return;
+        const el = d3.select(this);
+        const isPoly = scopeList.some(s => polyScopes.has(`scope:${s}`) || polyScopes.has(s));
+        const tag = scopeList.slice(0, 2).join(', ');
+        el.append('text')
+            .attr('x', eW / 2 - 8).attr('y', eH / 2 - 8)
+            .attr('text-anchor', 'end')
+            .attr('fill', isPoly ? C.correction : '#364152')
+            .attr('font-size', '8px')
+            .attr('font-weight', isPoly ? '600' : '400')
+            .text((isPoly ? '\u26A0 ' : '') + tag);
+    });
 
-    sG.append('text').attr('text-anchor', 'middle').attr('dy', 4)
-        .attr('fill', d => polyScopes.has(d.id) ? C.correction : '#5a6a7e')
-        .attr('font-size', '10px')
-        .attr('font-weight', d => polyScopes.has(d.id) ? '600' : '400')
-        .text(d => (d.label || d.id).replace('scope:', ''));
+    // Ghost label — show "consumed from: {user}"
+    eG.filter(d => isGhost(d)).append('text')
+        .attr('x', eW / 2 - 8).attr('y', -eH / 2 + 12)
+        .attr('text-anchor', 'end')
+        .attr('fill', 'rgba(0,229,160,0.5)')
+        .attr('font-size', '8px')
+        .text(d => `from ${d.data.original_user}`);
 
-    // Poly warning
-    sG.filter(d => polyScopes.has(d.id))
-        .append('text').attr('x', sW / 2 - 8).attr('y', -sH / 2 - 4)
-        .attr('fill', C.correction).attr('font-size', '12px').text('\u26A0');
+    // (Scope nodes no longer rendered — shown inline in event cards + filter panel above)
 
     // --- Click: highlight subgraph + popover ---
     const allNodes = g.selectAll('.g-user, .g-event, .g-scope');

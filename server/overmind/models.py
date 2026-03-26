@@ -132,7 +132,7 @@ class GraphEdge(BaseModel):
 
     source: str
     target: str
-    relation: Literal["pushed", "affects", "pulled"]
+    relation: Literal["pushed", "affects", "pulled", "consumed"]
 
 
 class PolymorphismAlert(BaseModel):

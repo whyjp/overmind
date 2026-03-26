@@ -327,11 +327,18 @@ class MemoryStore:
                     )
                 )
 
-        # Pull edges: who consumed which events
+        # Pull edges: create ghost (replica) nodes for consumed events
+        # Ghost node = a copy of the event shown under the consuming agent
         pull_seen: set[tuple[str, str]] = set()  # (puller, event_id) dedup
         for entry in self._pull_log.get(repo_id, []):
             puller = entry["puller"]
             evt_id = entry["event_id"]
+            evt_user = entry.get("event_user", "")
+
+            # Skip self-consumption (shouldn't happen, but safety)
+            if puller == evt_user:
+                continue
+
             key = (puller, evt_id)
             if key in pull_seen:
                 continue
@@ -342,9 +349,33 @@ class MemoryStore:
                 nodes.append(GraphNode(id=f"user:{puller}", type="user", label=puller))
                 seen_users.add(puller)
 
-            # Add pulled edge: event → puller (consumed by)
+            # Find original event to get its label/type
+            orig_evt = next((e for e in all_events if e.id == evt_id), None)
+            ghost_id = f"ghost:{puller}:{evt_id}"
+
+            # Create ghost node (type="ghost")
+            nodes.append(GraphNode(
+                id=ghost_id,
+                type="event",  # render as event but with ghost styling
+                label=orig_evt.result[:60] if orig_evt else evt_id,
+                event_type=orig_evt.type if orig_evt else None,
+                data={
+                    "ghost": True,
+                    "consumed_by": puller,
+                    "original_user": evt_user,
+                    "result": orig_evt.result if orig_evt else "",
+                    "ts": entry.get("ts", ""),
+                },
+            ))
+
+            # Edge: puller user → ghost (consumed)
             edges.append(
-                GraphEdge(source=f"event:{evt_id}", target=f"user:{puller}", relation="pulled")
+                GraphEdge(source=f"user:{puller}", target=ghost_id, relation="consumed")
+            )
+
+            # Edge: original event → ghost (propagated)
+            edges.append(
+                GraphEdge(source=f"event:{evt_id}", target=ghost_id, relation="pulled")
             )
 
         return GraphResponse(nodes=nodes, edges=edges, polymorphisms=polymorphisms)

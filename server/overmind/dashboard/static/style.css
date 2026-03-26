@@ -353,9 +353,54 @@ main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 }
 
 /* ====== GRAPH ====== */
+#graph-scope-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    background: rgba(6, 8, 12, 0.6);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    min-height: 40px;
+}
+#graph-scope-filter:empty { display: none; }
+
+.scope-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-right: 4px;
+}
+.scope-btn {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.scope-btn:hover { border-color: var(--accent); color: var(--text); }
+.scope-btn.active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.scope-btn.poly {
+    border-color: var(--red);
+    color: var(--red);
+}
+.scope-btn.poly.active {
+    background: var(--red-bg);
+}
+
 #graph-container {
     width: 100%;
-    height: 100%;
+    height: calc(100% - 40px);
     min-height: 500px;
     position: relative;
     background:
