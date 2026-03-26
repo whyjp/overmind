@@ -2,13 +2,17 @@
   "schema_version": "1",
   "name": "overmind-marketplace",
   "description": "Overmind: distributed memory sync for Claude Code agents",
+  "owner": {
+    "name": "whyjp"
+  },
   "plugins": [
     {
       "name": "overmind-plugin",
-      "description": "Real-time memory sync between Claude Code instances — push/pull events, broadcast, scope-filtered context injection",
+      "description": "Real-time memory sync between Claude Code instances",
       "version": "0.1.0",
       "source": {
-        "type": "relative",
+        "type": "git",
+        "url": "https://github.com/whyjp/overmind.git",
         "path": "plugin"
       }
     }
