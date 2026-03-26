@@ -251,6 +251,7 @@ function renderGraph(data) {
     mkArrow('a-default', '#1a2332');
     mkArrow('a-poly', C.correction);
     mkArrow('a-push', 'rgba(56,189,248,0.3)');
+    mkArrow('a-pull', 'rgba(0,229,160,0.4)');
 
     // --- Edges ---
     const bezier = (sx, sy, tx, ty) => {
@@ -268,13 +269,18 @@ function renderGraph(data) {
             return s && t ? bezier(s.x, s.y, t.x, t.y) : '';
         })
         .attr('stroke', d => {
+            if (d.relation === 'pulled') return 'rgba(0,229,160,0.35)';
             if (polyScopes.has(d.target)) return C.correction;
             if (d.relation === 'pushed') return 'rgba(56,189,248,0.25)';
             return '#1a2332';
         })
-        .attr('stroke-width', d => polyScopes.has(d.target) ? 2 : 1.2)
-        .attr('stroke-dasharray', d => d.relation === 'pulled' ? '4,3' : '')
+        .attr('stroke-width', d => {
+            if (d.relation === 'pulled') return 1.5;
+            return polyScopes.has(d.target) ? 2 : 1.2;
+        })
+        .attr('stroke-dasharray', d => d.relation === 'pulled' ? '6,4' : '')
         .attr('marker-end', d => {
+            if (d.relation === 'pulled') return 'url(#a-pull)';
             if (polyScopes.has(d.target)) return 'url(#a-poly)';
             if (d.relation === 'pushed') return 'url(#a-push)';
             return 'url(#a-default)';
@@ -390,6 +396,16 @@ function renderGraph(data) {
         lg.append('text').attr('x', x + 14).attr('y', 4)
             .attr('fill', '#364152').attr('font-size', '10px').text(it.l);
     });
+    // Edge legend
+    const elX = items.length * 96 + 20;
+    lg.append('line').attr('x1', elX).attr('y1', 0).attr('x2', elX + 20).attr('y2', 0)
+        .attr('stroke', 'rgba(56,189,248,0.4)').attr('stroke-width', 1.5);
+    lg.append('text').attr('x', elX + 26).attr('y', 4)
+        .attr('fill', '#364152').attr('font-size', '10px').text('pushed');
+    lg.append('line').attr('x1', elX + 90).attr('y1', 0).attr('x2', elX + 110).attr('y2', 0)
+        .attr('stroke', 'rgba(0,229,160,0.5)').attr('stroke-width', 1.5).attr('stroke-dasharray', '6,4');
+    lg.append('text').attr('x', elX + 116).attr('y', 4)
+        .attr('fill', '#364152').attr('font-size', '10px').text('pulled (consumed)');
 }
 
 // ============================================================

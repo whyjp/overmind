@@ -45,6 +45,8 @@ class MemoryStore:
         self.data_dir = Path(data_dir)
         # Per-repo in-memory dedup sets: {repo_id -> set of event ids}
         self._seen_ids: dict[str, set[str]] = defaultdict(set)
+        # Pull history: {repo_id -> [(user, event_id, ts)]}
+        self._pull_log: dict[str, list[dict]] = defaultdict(list)
 
     # ------------------------------------------------------------------
     # Repo listing
@@ -205,6 +207,18 @@ class MemoryStore:
         has_more = len(sorted_events) > limit
         result_events = sorted_events[:limit]
 
+        # Record pull history for graph visualization
+        puller = exclude_user  # the user who's pulling (they exclude themselves)
+        if puller:
+            now_iso = datetime.now(tz=timezone.utc).isoformat()
+            for evt in result_events:
+                self._pull_log[repo_id].append({
+                    "puller": puller,
+                    "event_id": evt.id,
+                    "event_user": evt.user,
+                    "ts": now_iso,
+                })
+
         return PullResponse(
             events=result_events,
             count=len(result_events),
@@ -312,6 +326,26 @@ class MemoryStore:
                         intents=scope_intents[scope],
                     )
                 )
+
+        # Pull edges: who consumed which events
+        pull_seen: set[tuple[str, str]] = set()  # (puller, event_id) dedup
+        for entry in self._pull_log.get(repo_id, []):
+            puller = entry["puller"]
+            evt_id = entry["event_id"]
+            key = (puller, evt_id)
+            if key in pull_seen:
+                continue
+            pull_seen.add(key)
+
+            # Ensure puller user node exists
+            if puller not in seen_users:
+                nodes.append(GraphNode(id=f"user:{puller}", type="user", label=puller))
+                seen_users.add(puller)
+
+            # Add pulled edge: event → puller (consumed by)
+            edges.append(
+                GraphEdge(source=f"event:{evt_id}", target=f"user:{puller}", relation="pulled")
+            )
 
         return GraphResponse(nodes=nodes, edges=edges, polymorphisms=polymorphisms)
 
