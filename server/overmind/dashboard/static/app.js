@@ -19,7 +19,7 @@ document.querySelectorAll('.tab').forEach(btn => {
 });
 
 function closeDetail() {
-    document.getElementById('detail-panel').classList.add('hidden');
+    dismissPopover();
 }
 
 // --- Repo list loading ---
@@ -139,6 +139,8 @@ async function loadGraph() {
 function renderGraph(data) {
     const svg = d3.select('#graph-svg');
     svg.selectAll('*').remove();
+    // Remove any leftover popover
+    d3.select('#graph-popover').remove();
 
     const container = document.getElementById('graph-container');
     const width = container.clientWidth || 900;
@@ -154,34 +156,99 @@ function renderGraph(data) {
     }
 
     const polyScopes = new Set(data.polymorphisms.map(p => p.scope));
+    const relationLabels = { pushed: 'pushed', affects: 'affects', pulled: 'pulled' };
 
+    // --- Simulation: stabilize then stop ---
     const simulation = d3.forceSimulation(data.nodes)
-        .force('link', d3.forceLink(data.edges).id(d => d.id).distance(100))
-        .force('charge', d3.forceManyBody().strength(-200))
+        .force('link', d3.forceLink(data.edges).id(d => d.id).distance(120).strength(0.8))
+        .force('charge', d3.forceManyBody().strength(-300))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(30));
+        .force('collision', d3.forceCollide().radius(40))
+        .alphaDecay(0.05);  // faster cooldown
 
     const g = svg.append('g');
 
     // Zoom
-    svg.call(d3.zoom().scaleExtent([0.1, 4]).on('zoom', (e) => {
+    const zoom = d3.zoom().scaleExtent([0.1, 4]).on('zoom', (e) => {
         g.attr('transform', e.transform);
-    }));
+    });
+    svg.call(zoom);
+    // Click on background dismisses popover
+    svg.on('click', (e) => {
+        if (e.target === svg.node()) dismissPopover();
+    });
 
-    // Edges
+    // --- Legend ---
+    const legend = svg.append('g').attr('transform', 'translate(16, 16)');
+    const legendItems = [
+        { shape: 'circle', color: '#58a6ff', label: 'User / Agent' },
+        { shape: 'rect', color: '#f85149', label: 'Correction' },
+        { shape: 'rect', color: '#d29922', label: 'Decision' },
+        { shape: 'rect', color: '#a371f7', label: 'Discovery' },
+        { shape: 'rect', color: '#f778ba', label: 'Broadcast' },
+        { shape: 'diamond', color: '#8b949e', label: 'Scope (file area)' },
+    ];
+    legendItems.forEach((item, i) => {
+        const row = legend.append('g').attr('transform', `translate(0, ${i * 22})`);
+        if (item.shape === 'circle') {
+            row.append('circle').attr('cx', 7).attr('cy', 7).attr('r', 6).attr('fill', item.color);
+        } else if (item.shape === 'diamond') {
+            row.append('rect').attr('x', 2).attr('y', 2).attr('width', 10).attr('height', 10)
+               .attr('fill', item.color).attr('rx', 2).attr('transform', 'rotate(45, 7, 7)');
+        } else {
+            row.append('rect').attr('x', 1).attr('y', 1).attr('width', 12).attr('height', 12)
+               .attr('fill', item.color).attr('rx', 2);
+        }
+        row.append('text').attr('x', 22).attr('y', 11).attr('fill', '#8b949e')
+           .attr('font-size', '11px').text(item.label);
+    });
+    // Edge legend
+    const edgeLegY = legendItems.length * 22 + 8;
+    const edgeLegend = [
+        { dash: '', color: '#58a6ff', label: 'pushed / affects' },
+        { dash: '5,5', color: '#8b949e', label: 'pulled' },
+        { dash: '', color: '#f85149', label: 'polymorphism conflict' },
+    ];
+    edgeLegend.forEach((item, i) => {
+        const row = legend.append('g').attr('transform', `translate(0, ${edgeLegY + i * 20})`);
+        row.append('line').attr('x1', 0).attr('y1', 8).attr('x2', 16).attr('y2', 8)
+           .attr('stroke', item.color).attr('stroke-width', 2)
+           .attr('stroke-dasharray', item.dash);
+        row.append('text').attr('x', 22).attr('y', 12).attr('fill', '#8b949e')
+           .attr('font-size', '11px').text(item.label);
+    });
+
+    // --- Edges with arrow markers ---
+    svg.append('defs').append('marker')
+        .attr('id', 'arrowhead').attr('viewBox', '0 0 10 6')
+        .attr('refX', 10).attr('refY', 3).attr('markerWidth', 8).attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0 L10,3 L0,6').attr('fill', '#484f58');
+
     const link = g.selectAll('.edge')
         .data(data.edges)
         .join('line')
+        .attr('marker-end', 'url(#arrowhead)')
         .attr('class', d => {
             let cls = 'edge';
             if (d.relation === 'pulled') cls += ' edge-pulled';
-            const targetNode = data.nodes.find(n => n.id === (typeof d.target === 'object' ? d.target.id : d.target));
-            if (targetNode && polyScopes.has(targetNode.id)) cls += ' edge-polymorphism';
+            const tid = typeof d.target === 'object' ? d.target.id : d.target;
+            if (polyScopes.has(tid)) cls += ' edge-polymorphism';
             return cls;
         });
 
-    // Nodes
-    const nodeSize = d => d.type === 'user' ? 14 : d.type === 'scope' ? 10 : 8;
+    // Edge labels
+    const edgeLabel = g.selectAll('.edge-label')
+        .data(data.edges)
+        .join('text')
+        .attr('class', 'edge-label')
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#484f58')
+        .attr('font-size', '9px')
+        .text(d => relationLabels[d.relation] || '');
+
+    // --- Nodes ---
+    const nodeSize = d => d.type === 'user' ? 16 : d.type === 'scope' ? 12 : 10;
     const nodeClass = d => {
         if (d.type === 'user') return 'node-user';
         if (d.type === 'scope') return 'node-scope' + (polyScopes.has(d.id) ? ' polymorphism-glow' : '');
@@ -191,11 +258,19 @@ function renderGraph(data) {
     const node = g.selectAll('.node')
         .data(data.nodes)
         .join('g')
-        .attr('class', 'node')
+        .attr('class', d => 'node' + (d.type === 'user' ? ' node-group-user' : ''))
+        .attr('cursor', 'pointer')
         .call(d3.drag()
-            .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('start', (e, d) => {
+                if (!e.active) simulation.alphaTarget(0.1).restart();
+                d.fx = d.x; d.fy = d.y;
+            })
             .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
-            .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+            .on('end', (e, d) => {
+                if (!e.active) simulation.alphaTarget(0);
+                // Pin the dragged node in place
+                d.fx = d.x; d.fy = d.y;
+            })
         );
 
     node.each(function(d) {
@@ -203,16 +278,20 @@ function renderGraph(data) {
         if (d.type === 'user') {
             el.append('circle').attr('r', nodeSize(d)).attr('class', nodeClass(d));
         } else if (d.type === 'scope') {
+            // Diamond shape for scope
+            const s = nodeSize(d);
             el.append('rect')
-                .attr('width', nodeSize(d) * 2).attr('height', nodeSize(d) * 2)
-                .attr('x', -nodeSize(d)).attr('y', -nodeSize(d))
-                .attr('rx', 2)
-                .attr('class', nodeClass(d));
+                .attr('width', s * 1.6).attr('height', s * 1.6)
+                .attr('x', -s * 0.8).attr('y', -s * 0.8)
+                .attr('rx', 3)
+                .attr('class', nodeClass(d))
+                .attr('transform', 'rotate(45)');
         } else {
+            const s = nodeSize(d);
             el.append('rect')
-                .attr('width', nodeSize(d) * 2).attr('height', nodeSize(d) * 2)
-                .attr('x', -nodeSize(d)).attr('y', -nodeSize(d))
-                .attr('rx', 1)
+                .attr('width', s * 2).attr('height', s * 2)
+                .attr('x', -s).attr('y', -s)
+                .attr('rx', 3)
                 .attr('class', nodeClass(d));
         }
     });
@@ -220,23 +299,105 @@ function renderGraph(data) {
     // Labels
     node.append('text')
         .attr('class', 'node-label')
-        .attr('dy', d => nodeSize(d) + 14)
+        .attr('dy', d => nodeSize(d) + 16)
         .attr('text-anchor', 'middle')
-        .text(d => (d.label || d.id).substring(0, 30));
+        .text(d => {
+            if (d.type === 'user') return d.label || d.id;
+            if (d.type === 'scope') return d.label || d.id;
+            // For events, show short result
+            return (d.label || d.id).substring(0, 25);
+        });
 
-    // Click handler
+    // --- Click: floating popover near node ---
+    let selectedNode = null;
     node.on('click', (e, d) => {
-        const panel = document.getElementById('detail-panel');
-        panel.classList.remove('hidden');
-        document.getElementById('detail-content').textContent = JSON.stringify(d, null, 2);
+        e.stopPropagation();
+        selectedNode = d;
+
+        // Highlight connected edges
+        link.attr('opacity', edge => {
+            const sid = typeof edge.source === 'object' ? edge.source.id : edge.source;
+            const tid = typeof edge.target === 'object' ? edge.target.id : edge.target;
+            return (sid === d.id || tid === d.id) ? 1 : 0.15;
+        });
+        node.attr('opacity', n => {
+            if (n.id === d.id) return 1;
+            // Check if connected
+            const connected = data.edges.some(edge => {
+                const sid = typeof edge.source === 'object' ? edge.source.id : edge.source;
+                const tid = typeof edge.target === 'object' ? edge.target.id : edge.target;
+                return (sid === d.id && tid === n.id) || (tid === d.id && sid === n.id);
+            });
+            return connected ? 1 : 0.2;
+        });
+
+        showPopover(d, e);
     });
 
+    // --- Simulation tick ---
     simulation.on('tick', () => {
         link
             .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
             .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+        edgeLabel
+            .attr('x', d => (d.source.x + d.target.x) / 2)
+            .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
         node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
+
+    // Stop simulation after layout stabilizes
+    simulation.on('end', () => {
+        // Fix all nodes in place after stabilization
+        data.nodes.forEach(d => { d.fx = d.x; d.fy = d.y; });
+    });
+
+    // --- Popover functions ---
+    function showPopover(d, event) {
+        dismissPopover();
+        const popover = document.createElement('div');
+        popover.id = 'graph-popover';
+
+        let html = `<div class="popover-header">${d.type.toUpperCase()}: ${(d.label || d.id)}</div>`;
+
+        if (d.type === 'event' && d.data) {
+            if (d.data.result) html += `<div class="popover-row"><b>Result:</b> ${d.data.result}</div>`;
+            if (d.data.process && d.data.process.length) {
+                html += `<div class="popover-row"><b>Process:</b></div>`;
+                d.data.process.forEach(p => { html += `<div class="popover-step">&rarr; ${p}</div>`; });
+            }
+            if (d.data.ts) html += `<div class="popover-row muted">${new Date(d.data.ts).toLocaleString()}</div>`;
+        } else if (d.type === 'scope') {
+            const poly = data.polymorphisms.find(p => p.scope === d.id);
+            if (poly) {
+                html += `<div class="popover-row popover-warn">Polymorphism detected!</div>`;
+                html += `<div class="popover-row">Users: ${poly.users.join(', ')}</div>`;
+                poly.intents.forEach(i => { html += `<div class="popover-step">&bull; ${i}</div>`; });
+            }
+        }
+
+        popover.innerHTML = html;
+        container.appendChild(popover);
+
+        // Position near mouse, within bounds
+        const rect = container.getBoundingClientRect();
+        let left = event.clientX - rect.left + 16;
+        let top = event.clientY - rect.top - 10;
+        // Keep within container
+        const pw = 320, ph = popover.offsetHeight || 200;
+        if (left + pw > rect.width) left = left - pw - 32;
+        if (top + ph > rect.height) top = rect.height - ph - 8;
+        if (top < 0) top = 8;
+        popover.style.left = left + 'px';
+        popover.style.top = top + 'px';
+    }
+}
+
+function dismissPopover() {
+    const existing = document.getElementById('graph-popover');
+    if (existing) existing.remove();
+    // Reset opacity
+    d3.selectAll('.node').attr('opacity', 1);
+    d3.selectAll('.edge').attr('opacity', 1);
 }
 
 // --- Timeline ---

@@ -135,35 +135,35 @@ th { color: #8b949e; font-weight: 600; }
     pointer-events: none;
 }
 
-#detail-panel {
-    position: fixed;
-    right: 0;
-    top: 60px;
-    width: 400px;
-    height: calc(100vh - 60px);
-    background: #161b22;
-    border-left: 1px solid #30363d;
-    padding: 16px;
+/* Graph popover (floating, near clicked node) */
+#graph-popover {
+    position: absolute;
+    width: 320px;
+    max-height: 360px;
     overflow-y: auto;
-    z-index: 10;
-}
-
-#detail-panel.hidden { display: none; }
-#detail-panel button {
-    float: right;
-    background: transparent;
-    color: #8b949e;
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-}
-
-#detail-content {
-    margin-top: 32px;
+    background: #1c2128;
+    border: 1px solid #444c56;
+    border-radius: 8px;
+    padding: 12px 14px;
+    z-index: 20;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     font-size: 12px;
-    white-space: pre-wrap;
-    word-break: break-all;
+    color: #c9d1d9;
+    pointer-events: auto;
 }
+.popover-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #58a6ff;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 6px;
+}
+.popover-row { margin: 4px 0; line-height: 1.5; }
+.popover-row b { color: #8b949e; }
+.popover-step { margin-left: 12px; color: #b1bac4; line-height: 1.5; }
+.popover-warn { color: #f85149; font-weight: 600; }
+.popover-row.muted { color: #6e7681; font-size: 11px; margin-top: 6px; }
 
 /* Timeline */
 #timeline-container {
