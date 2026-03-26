@@ -22,11 +22,14 @@ def main() -> None:
     data_dir = Path(args.data_dir)
     store = MemoryStore(data_dir=data_dir)
 
-    app = create_app(data_dir=data_dir, store=store)
+    # Create MCP app first to capture its lifespan
+    mcp = create_mcp_server(store)
+    mcp_app = mcp.http_app(path="/")
+
+    app = create_app(data_dir=data_dir, store=store, lifespan=mcp_app.lifespan)
 
     # Mount MCP at /mcp
-    mcp = create_mcp_server(store)
-    app.mount("/mcp", mcp.http_app())
+    app.mount("/mcp", mcp_app)
 
     uvicorn.run(app, host=args.host, port=args.port)
 

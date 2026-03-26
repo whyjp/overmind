@@ -2,7 +2,7 @@
   "mcpServers": {
     "overmind": {
       "type": "http",
-      "url": "http://localhost:7777/mcp"
+      "url": "http://localhost:7777/mcp/"
     }
   }
 }
