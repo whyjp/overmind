@@ -11,26 +11,6 @@ Distributed memory synchronization for Claude Code — share knowledge, process,
 - **다형성 감지**: 같은 코드 영역에 서로 다른 intent가 공존할 때 감지 및 고지
 - **실시간 broadcast**: 긴급 변경사항을 모든 에이전트에게 즉시 전파
 
-## Architecture
-
-```
-Overmind Plugin (클라이언트)          Overmind Server
-┌─────────────────────┐            ┌──────────────────────┐
-│ Hook → push         │── POST ──→│ /api/memory/push     │
-│                     │            │   JSONL store        │
-│ Hook → pull         │── GET ───←│ /api/memory/pull     │
-│   → Claude 해석     │            │   scope filter       │
-│                     │            │                      │
-│ Skill → broadcast   │── POST ──→│ /api/memory/broadcast│
-│                     │            │   priority 관리      │
-│                     │            │                      │
-│ MCP tool            │── MCP ───→│ /mcp endpoint        │
-└─────────────────────┘            │                      │
-각 Claude Code 인스턴스에 1개씩       │ /dashboard           │
-                                   └──────────────────────┘
-                                   프로젝트당 1개 (공유)
-```
-
 ## Quick Start
 
 ### 1. Server 실행
@@ -43,129 +23,76 @@ uv run python -m overmind.main
 
 서버가 `http://localhost:7777`에서 시작됩니다.
 
-| Endpoint | URL |
-|----------|-----|
-| REST API | `http://localhost:7777/api/...` |
-| MCP | `http://localhost:7777/mcp` |
-| Dashboard | `http://localhost:7777/dashboard` |
+### 2. Plugin 설치 (GitHub에서 한 번에)
 
-**옵션:**
+대상 프로젝트의 Claude Code 세션에서:
+
+```
+/plugin marketplace add whyjp/overmind
+/plugin install overmind-plugin
+```
+
+이 한 번의 설치로 **hooks + MCP + skills + commands**가 모두 설정됩니다.
+
+| 자동 설정 항목 | 내용 |
+|-------------|------|
+| **Hooks** | SessionStart(pull), SessionEnd(push), PreToolUse(scope 경고/차단) |
+| **MCP** | overmind_push, overmind_pull, overmind_broadcast 도구 |
+| **Skills** | overmind-broadcast, overmind-report |
+| **Commands** | /overmind:broadcast |
+
+### 3. 확인
 
 ```bash
-uv run python -m overmind.main --host 0.0.0.0 --port 7777 --data-dir ./data
+# 서버 상태
+curl http://localhost:7777/api/repos
+
+# 대시보드
+# http://localhost:7777/dashboard
 ```
 
-- `--host`: 바인드 호스트 (기본: `0.0.0.0`, 팀 공유 시 외부 접근 가능)
-- `--port`: 포트 (기본: `7777`)
-- `--data-dir`: JSONL 데이터 저장 경로 (기본: `./data`)
+### 4. 2-에이전트 교차 테스트
 
-### 2. Claude Code에 MCP 서버 연결
-
-각 개발자/에이전트의 Claude Code에서:
+터미널 2개에서 동일 프로젝트, 서로 다른 유저로 실행:
 
 ```bash
-claude mcp add overmind --transport http http://localhost:7777/mcp
+# 터미널 A
+OVERMIND_USER=agent_a claude
+
+# 터미널 B
+OVERMIND_USER=agent_b claude
 ```
 
-팀원이 다른 머신에서 접속하는 경우:
+Agent A 작업 → 세션 종료 → Agent B 세션 시작 시 Agent A의 이벤트가 자동 pull됩니다.
 
-```bash
-claude mcp add overmind --transport http http://<서버IP>:7777/mcp
-```
-
-연결 확인:
-
-```bash
-claude mcp list
-# overmind: http://localhost:7777/mcp (connected)
-```
-
-### 3. Plugin 설치 (자동 push/pull 훅)
-
-```bash
-# 로컬 테스트 모드
-claude --plugin-dir ./plugin
-
-# 또는 플러그인 디렉토리를 직접 지정
-```
-
-**Plugin 환경변수 설정** (선택):
-
-```bash
-# 서버 URL (기본: http://localhost:7777)
-export OVERMIND_URL=http://192.168.1.100:7777
-
-# 유저 식별자 (기본: 시스템 USERNAME)
-export OVERMIND_USER=dev_a
-```
-
-### 4. Dashboard 확인
-
-브라우저에서 `http://localhost:7777/dashboard` 접속:
-
-- **Overview**: push/pull 통계, 이벤트 타입 분포, 이벤트 피드
-- **Graph**: 에이전트 → 이벤트 → 스코프 3-column 관계 그래프, 다형성 감지 표시
-- **Timeline**: 에이전트별 swimlane 타임라인, broadcast 수직선
-
-## Usage
-
-### MCP Tools (Claude Code 세션에서 직접 사용)
-
-MCP 연결 후 Claude Code 세션에서 자연어로 사용:
-
-```
-"이 변경사항을 팀에 알려줘"     → overmind_broadcast 호출
-"팀 최근 활동 보여줘"          → overmind_pull 호출
-"auth 영역 관련 이력 확인해줘"  → overmind_pull(scope="src/auth/*")
-```
+## How it works
 
 ### Plugin Hook 동작
 
-Plugin이 설치되면 자동으로:
-
 | 시점 | 동작 |
 |------|------|
-| **세션 시작** | 마지막 pull 이후 팀 이벤트를 자동 pull → Claude context에 주입 |
+| **세션 시작** | 팀 이벤트를 pull → RULES/CONTEXT/ANNOUNCEMENTS로 분류 → Claude에 지시형 프롬프트 주입 |
+| **파일 수정 시** | scope 관련 이벤트 pull → urgent correction이면 **편집 차단**, 그 외 경고 |
 | **세션 종료** | 세션 중 주요 이벤트를 자동 push |
-| **파일 수정 시** (Write/Edit) | 해당 파일 scope의 팀 이벤트를 선제적으로 pull → 사전 차단 고지 |
 
-### Slash Command
+### Architecture
 
 ```
-/overmind:broadcast "API 스키마 v2로 변경됨"
-```
-
-### REST API 직접 호출
-
-```bash
-# Push events
-curl -X POST http://localhost:7777/api/memory/push \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_id": "github.com/team/project",
-    "user": "dev_a",
-    "events": [{
-      "id": "evt_001",
-      "type": "correction",
-      "ts": "2026-03-26T14:30:00+09:00",
-      "result": ".env에 SERVICE_A_INTERNAL_URL 설정 필요",
-      "files": ["src/config/env.ts"],
-      "process": ["ECONNREFUSED 발생", "SERVICE_A_INTERNAL_URL 미설정 확인"]
-    }]
-  }'
-
-# Pull events
-curl "http://localhost:7777/api/memory/pull?repo_id=github.com/team/project&exclude_user=dev_b&scope=src/config/*"
-
-# Broadcast
-curl -X POST http://localhost:7777/api/memory/broadcast \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_id": "github.com/team/project",
-    "user": "dev_a",
-    "message": "API 스키마 v2로 변경",
-    "priority": "urgent"
-  }'
+Overmind Plugin (클라이언트)          Overmind Server
+┌─────────────────────┐            ┌──────────────────────┐
+│ Hook → push         │── POST ──→│ /api/memory/push     │
+│                     │            │   JSONL store        │
+│ Hook → pull         │── GET ───←│ /api/memory/pull     │
+│   → Claude 해석     │            │   scope filter       │
+│                     │            │                      │
+│ Skill → broadcast   │── POST ──→│ /api/memory/broadcast│
+│                     │            │   priority 관리      │
+│                     │            │                      │
+│ MCP tool            │── MCP ───→│ /mcp/ endpoint       │
+└─────────────────────┘            │                      │
+각 Claude Code 인스턴스에 1개씩       │ /dashboard           │
+                                   └──────────────────────┘
+                                   프로젝트당 1개 (공유)
 ```
 
 ## Event Types
@@ -178,6 +105,119 @@ curl -X POST http://localhost:7777/api/memory/broadcast \
 | `change` | 파일 구조 변경 | `모듈 추가/삭제/리팩토링` |
 | `broadcast` | 긴급 전파 | `API 스키마 변경됨` |
 
+## Usage
+
+### MCP Tools (Claude Code 세션에서 자연어 사용)
+
+```
+"이 변경사항을 팀에 알려줘"     → overmind_broadcast 호출
+"팀 최근 활동 보여줘"          → overmind_pull 호출
+"auth 영역 관련 이력 확인해줘"  → overmind_pull(scope="src/auth/*")
+```
+
+### Slash Command
+
+```
+/overmind:broadcast "API 스키마 v2로 변경됨"
+```
+
+### Dashboard
+
+`http://localhost:7777/dashboard`:
+
+- **Overview**: push/pull 통계, 이벤트 타입 분포, 이벤트 피드
+- **Graph**: Flow View (시간순 이벤트 흐름 + ghost dots) / Agent View / Scope View
+- **Timeline**: 에이전트별 swimlane 타임라인, broadcast 수직선
+
+---
+
+## Manual Setup (Plugin 마켓플레이스 대신 수동 설치)
+
+마켓플레이스 설치가 안 되는 경우 수동으로 설정합니다.
+
+### --plugin-dir (로컬 개발/테스트)
+
+```bash
+claude --plugin-dir /path/to/overmind/plugin
+```
+
+영구 설정:
+
+```json
+// .claude/settings.local.json
+{ "plugins": ["/path/to/overmind/plugin"] }
+```
+
+### MCP 수동 연결
+
+```bash
+claude mcp add overmind --transport http http://localhost:7777/mcp/
+```
+
+팀원이 다른 머신에서 접속하는 경우:
+
+```bash
+claude mcp add overmind --transport http http://<서버IP>:7777/mcp/
+```
+
+### Hooks 수동 설정
+
+`.claude/settings.local.json` (`PLUGIN_DIR`을 실제 경로로 교체):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{"type": "command", "command": "python PLUGIN_DIR/hooks/on_session_start.py", "timeout": 5000}],
+    "SessionEnd": [{"type": "command", "command": "python PLUGIN_DIR/hooks/on_session_end.py", "timeout": 5000}],
+    "PreToolUse": [{"type": "command", "matcher": "^(Write|Edit)$", "command": "python PLUGIN_DIR/hooks/on_pre_tool_use.py", "timeout": 3000}]
+  }
+}
+```
+
+### Environment Variables
+
+| 변수 | 기본값 | 용도 |
+|------|--------|------|
+| `OVERMIND_URL` | `http://localhost:7777` | 서버 주소 |
+| `OVERMIND_USER` | 시스템 `USER`/`USERNAME` | 에이전트 식별자 |
+| `OVERMIND_REPO_ID` | `git remote` 자동 추출 | git 없는 환경 |
+
+### REST API 직접 호출
+
+```bash
+# Push
+curl -X POST http://localhost:7777/api/memory/push \
+  -H "Content-Type: application/json" \
+  -d '{"repo_id": "github.com/team/project", "user": "dev_a",
+       "events": [{"id": "evt_001", "type": "correction",
+       "ts": "2026-03-26T05:30:00Z",
+       "result": ".env에 SERVICE_A_INTERNAL_URL 설정 필요",
+       "files": ["src/config/env.ts"]}]}'
+
+# Pull
+curl "http://localhost:7777/api/memory/pull?repo_id=github.com/team/project&exclude_user=dev_b"
+
+# Broadcast
+curl -X POST http://localhost:7777/api/memory/broadcast \
+  -H "Content-Type: application/json" \
+  -d '{"repo_id": "github.com/team/project", "user": "dev_a",
+       "message": "API 스키마 v2로 변경", "priority": "urgent"}'
+```
+
+---
+
+## Development
+
+```bash
+cd server && uv sync --all-extras
+
+# Run tests (44 tests)
+uv run pytest tests/ -v
+
+# Run server
+uv run python -m overmind.main --port 7778
+```
+
 ## Project Structure
 
 ```
@@ -188,38 +228,30 @@ overmind/
 │   │   ├── store.py           # JSONL store + scope index
 │   │   ├── api.py             # FastAPI REST endpoints
 │   │   ├── mcp_server.py      # FastMCP wrapper
-│   │   ├── main.py            # Entry point
+│   │   ├── main.py            # Entry point (REST + MCP + Dashboard)
 │   │   └── dashboard/static/  # Web dashboard (D3.js)
-│   ├── tests/                 # pytest test suite
-│   └── pyproject.toml
+│   └── tests/                 # pytest test suite
 ├── plugin/                    # Claude Code Plugin
 │   ├── hooks/                 # SessionStart/End, PreToolUse
 │   ├── skills/                # broadcast, report
 │   ├── commands/              # /overmind:broadcast
-│   └── scripts/api_client.py  # Shared HTTP client
+│   └── scripts/               # api_client, formatter
 └── docs/
-    └── overmind-research.md   # Architecture research document
-```
-
-## Development
-
-```bash
-# Install dev dependencies
-cd server && uv sync --all-extras
-
-# Run tests
-uv run pytest tests/ -v
-
-# Run server in development
-uv run python -m overmind.main --port 7778
+    ├── prd.md
+    ├── setup-guide.md
+    ├── design/
+    ├── plans/
+    └── research/
+        ├── overmind-research.md
+        └── cross-agent-influence.md
 ```
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| Server | Python, FastAPI, FastMCP, Pydantic v2 |
+| Server | Python 3.11+, FastAPI, FastMCP v3, Pydantic v2 |
 | Storage | File-based JSONL (Phase 2: SQLite) |
 | Dashboard | Vanilla JS, D3.js v7 |
-| Plugin hooks | Python (httpx) |
-| Tests | pytest, pytest-asyncio, FastMCP in-memory client |
+| Plugin | Python (urllib, no dependencies) |
+| Tests | pytest, pytest-asyncio, httpx, FastMCP in-memory client |
