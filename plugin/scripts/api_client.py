@@ -7,16 +7,20 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 
 OVERMIND_URL = os.environ.get("OVERMIND_URL", "http://localhost:7777")
-STATE_FILE = Path.home() / ".overmind_state.json"
+STATE_FILE = Path(os.environ.get("OVERMIND_STATE_FILE", str(Path.home() / ".overmind_state.json")))
 
 
 def get_repo_id() -> str | None:
-    """Derive repo_id from git remote origin URL."""
+    """Derive repo_id from git remote origin URL, or OVERMIND_REPO_ID env var."""
+    env_repo = os.environ.get("OVERMIND_REPO_ID")
+    if env_repo:
+        return env_repo
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -82,7 +86,7 @@ def api_get(path: str, params: dict | None = None) -> dict | None:
     try:
         url = f"{OVERMIND_URL}{path}"
         if params:
-            qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
+            qs = urlencode({k: v for k, v in params.items() if v is not None})
             url = f"{url}?{qs}"
         req = Request(url, method="GET")
         with urlopen(req, timeout=5) as resp:

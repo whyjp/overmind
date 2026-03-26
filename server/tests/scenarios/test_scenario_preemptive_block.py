@@ -19,7 +19,7 @@ def test_preemptive_block_scenario(store):
         id="evt_preempt_001",
         repo_id=REPO,
         user="dev_a",
-        ts="2026-03-26T14:00:00+09:00",
+        ts="2026-03-26T05:00:00Z",
         type="correction",
         result=".env에 SERVICE_A_INTERNAL_URL=http://localhost:3001 설정 필요",
         files=["src/config/env.ts", ".env.example"],

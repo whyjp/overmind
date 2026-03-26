@@ -10,7 +10,7 @@ def store(data_dir):
 
 def _make_event(id: str, user: str = "dev_a", repo_id: str = "github.com/test/repo",
                 type: str = "correction", files: list[str] | None = None,
-                ts: str = "2026-03-26T14:30:00+09:00", result: str = "test result",
+                ts: str = "2026-03-26T05:30:00Z", result: str = "test result",
                 priority: str = "normal") -> MemoryEvent:
     return MemoryEvent(
         id=id, repo_id=repo_id, user=user, ts=ts, type=type,
@@ -64,10 +64,10 @@ class TestPullBasic:
         assert result.events[0].user == "dev_a"
 
     def test_pull_with_since(self, store):
-        evt_old = _make_event("evt_001", ts="2026-03-25T10:00:00+09:00")
-        evt_new = _make_event("evt_002", ts="2026-03-26T15:00:00+09:00")
+        evt_old = _make_event("evt_001", ts="2026-03-25T01:00:00Z")
+        evt_new = _make_event("evt_002", ts="2026-03-26T06:00:00Z")
         store.push([evt_old, evt_new])
-        result = store.pull(repo_id="github.com/test/repo", since="2026-03-26T00:00:00+09:00")
+        result = store.pull(repo_id="github.com/test/repo", since="2026-03-25T15:00:00Z")
         assert len(result.events) == 1
         assert result.events[0].id == "evt_002"
 
@@ -84,8 +84,8 @@ class TestPullBasic:
         assert result.has_more is False
 
     def test_pull_broadcast_urgent_first(self, store):
-        evt_normal = _make_event("evt_001", priority="normal", ts="2026-03-26T14:00:00+09:00")
-        evt_urgent = _make_event("evt_002", priority="urgent", ts="2026-03-26T13:00:00+09:00")
+        evt_normal = _make_event("evt_001", priority="normal", ts="2026-03-26T05:00:00Z")
+        evt_urgent = _make_event("evt_002", priority="urgent", ts="2026-03-26T04:00:00Z")
         store.push([evt_normal, evt_urgent])
         result = store.pull(repo_id="github.com/test/repo")
         assert result.events[0].id == "evt_002"  # urgent first despite older ts

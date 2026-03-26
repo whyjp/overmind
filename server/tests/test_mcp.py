@@ -24,7 +24,7 @@ class TestMCPTools:
                 "events": [{
                     "id": "evt_001",
                     "type": "correction",
-                    "ts": "2026-03-26T14:30:00+09:00",
+                    "ts": "2026-03-26T05:30:00Z",
                     "result": ".env에 SERVICE_A_INTERNAL_URL 필요",
                     "files": ["src/config/env.ts"],
                 }],
@@ -64,7 +64,7 @@ class TestMCPTools:
                     "events": [{
                         "id": f"evt_{user}_{start_id + i}",
                         "type": "discovery",
-                        "ts": "2026-03-26T14:30:00+09:00",
+                        "ts": "2026-03-26T05:30:00Z",
                         "result": f"discovery {i}",
                     }],
                 })

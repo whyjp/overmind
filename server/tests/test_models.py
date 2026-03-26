@@ -8,7 +8,7 @@ class TestMemoryEvent:
             id="evt_001",
             repo_id="github.com/user/project",
             user="dev_a",
-            ts="2026-03-26T14:30:22+09:00",
+            ts="2026-03-26T05:30:22Z",
             type="correction",
             result=".env에 SERVICE_A_INTERNAL_URL 필요",
         )
@@ -20,7 +20,7 @@ class TestMemoryEvent:
             id="evt_002",
             repo_id="github.com/user/project",
             user="dev_a",
-            ts="2026-03-26T14:30:22+09:00",
+            ts="2026-03-26T05:30:22Z",
             type="decision",
             result="OAuth2 기반으로 전환",
             prompt="인증 방식 전환",
@@ -38,7 +38,7 @@ class TestMemoryEvent:
                 id="evt_003",
                 repo_id="github.com/user/project",
                 user="dev_a",
-                ts="2026-03-26T14:30:22+09:00",
+                ts="2026-03-26T05:30:22Z",
                 type="invalid_type",
                 result="test",
             )
@@ -49,7 +49,7 @@ class TestMemoryEvent:
                 id="evt_004",
                 repo_id="github.com/user/project",
                 user="dev_a",
-                ts="2026-03-26T14:30:22+09:00",
+                ts="2026-03-26T05:30:22Z",
                 type="correction",
                 # result missing
             )
@@ -64,7 +64,7 @@ class TestPushRequest:
                 {
                     "id": "evt_001",
                     "type": "correction",
-                    "ts": "2026-03-26T14:30:22+09:00",
+                    "ts": "2026-03-26T05:30:22Z",
                     "result": "test result",
                 }
             ],

@@ -25,7 +25,7 @@ class TestPushEndpoint:
             "events": [{
                 "id": "evt_001",
                 "type": "correction",
-                "ts": "2026-03-26T14:30:00+09:00",
+                "ts": "2026-03-26T05:30:00Z",
                 "result": "test result",
             }],
         })
@@ -59,7 +59,7 @@ class TestPullEndpoint:
             "events": [{
                 "id": "evt_001",
                 "type": "correction",
-                "ts": "2026-03-26T14:30:00+09:00",
+                "ts": "2026-03-26T05:30:00Z",
                 "result": "found the bug",
                 "files": ["src/auth/login.ts"],
             }],
@@ -117,7 +117,7 @@ class TestReportEndpoint:
             "user": "dev_a",
             "events": [{
                 "id": "evt_001", "type": "correction",
-                "ts": "2026-03-26T14:30:00+09:00", "result": "fix",
+                "ts": "2026-03-26T05:30:00Z", "result": "fix",
             }],
         })
         resp = await client.get("/api/report", params={
@@ -134,7 +134,7 @@ class TestReportEndpoint:
             "user": "dev_a",
             "events": [{
                 "id": "evt_001", "type": "correction",
-                "ts": "2026-03-26T14:30:00+09:00", "result": "fix",
+                "ts": "2026-03-26T05:30:00Z", "result": "fix",
                 "files": ["src/auth/login.ts"],
             }],
         })
