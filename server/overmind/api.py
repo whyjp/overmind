@@ -41,7 +41,7 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
     app = FastAPI(title="Overmind Memory Sync Server")
 
     # Mount dashboard static files if directory exists
-    dashboard_dir = Path(__file__).parent.parent / "dashboard" / "dist"
+    dashboard_dir = Path(__file__).parent / "dashboard" / "static"
     if dashboard_dir.exists():
         app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
 
