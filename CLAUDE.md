@@ -67,7 +67,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 ### Phase 2 계획 (A/B 병렬, 동등 우선순위)
 
 **Phase 2-A: 서버 데이터 품질 개선**
-- 서버 측 서머리 생성 (경량 LLM — process→lesson 압축 시에만)
+- 서버 측 서머리 생성 (경량 LLM — process→lesson 압축 시에만, **초기 구현은 mocking API로 처리**)
 - `?detail=lesson|diff|full` pull 파라미터
 - SQLite store 이관
 - 피드백 점수 (relevance_score, prevented_error) 축적
