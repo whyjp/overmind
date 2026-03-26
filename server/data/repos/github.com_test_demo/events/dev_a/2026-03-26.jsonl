@@ -1,1 +1,0 @@
-{"id":"smoke_001","repo_id":"github.com/test/demo","user":"dev_a","ts":"2026-03-26T14:30:00+09:00","type":"correction","result":"smoke test push works","prompt":null,"files":["src/test.ts"],"process":["step 1","step 2"],"priority":"normal","scope":null}

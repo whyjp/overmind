@@ -1,1 +1,0 @@
-{"id":"bcast_449511f7ba0b","repo_id":"github.com/overmind/demo","user":"agent_1","ts":"2026-03-26T14:11:17.143871+00:00","type":"broadcast","result":"API 스키마 v2로 변경됨. user_id가 uuid에서 string으로 변경. 이전 스키마 기준 구현은 수정 필요.","prompt":null,"files":["src/api/schema.ts","src/api/types.ts"],"process":[],"priority":"urgent","scope":"src/api/*"}
