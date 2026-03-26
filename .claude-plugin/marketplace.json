@@ -11,7 +11,7 @@
       "description": "Real-time memory sync between Claude Code instances",
       "version": "0.1.0",
       "source": {
-        "type": "git",
+        "source": "git-subdir",
         "url": "https://github.com/whyjp/overmind.git",
         "path": "plugin"
       }
