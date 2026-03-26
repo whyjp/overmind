@@ -5,7 +5,7 @@
 Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시간 동기화하는 시스템이다.
 두 아티팩트: **Overmind Server** (Python, FastAPI + FastMCP) + **Overmind Plugin** (Claude Code 플러그인).
 
-## Current State: Phase 1 Complete (구현 완료, 실사용 검증 전)
+## Current State: Phase 1 구현 완료 + 대시보드 개선 진행 중
 
 ### 완료된 것
 
@@ -13,22 +13,34 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - Pydantic 모델, JSONL file-based store (push/pull/dedup/scope filter/TTL)
 - FastAPI REST API: push, pull, broadcast, report, graph, timeline, repos
 - FastMCP v3 wrapper: overmind_push, overmind_pull, overmind_broadcast
-- Web dashboard: Overview (통계+이벤트피드), Graph (3-column Agent→Event→Scope), Timeline (swimlane)
+- Web dashboard: Overview + Graph + Timeline (Hive Mind 테마)
+- Pull 이력 추적: 누가 어떤 이벤트를 consume했는지 in-memory 기록
+- Graph: ghost 노드(소비된 이벤트 복제본), 2-column 레이아웃(Agent→Events), scope 인라인 태그
 - 단일 프로세스에서 REST + MCP + Dashboard 서빙 (port 7777)
 
 **Plugin** (`plugin/`):
 - Hook: SessionStart(auto pull), SessionEnd(auto push), PreToolUse(selective pull on Write/Edit)
 - Skill: overmind-broadcast, overmind-report
 - Command: /overmind:broadcast
-- API client: httpx 기반 REST 호출, git remote → repo_id 정규화
+- API client: urllib 기반 REST 호출, git remote → repo_id 정규화
 
 **Tests**: 33개 전부 pass (models 7 + store 11 + api 9 + mcp 3 + scenarios 3)
 
 **Docs**:
-- `docs/prd.md` — PRD (요구사항, 성공기준, 비기능요구사항)
+- `docs/prd.md` — PRD
 - `docs/research/overmind-research.md` — 아키텍처 연구 (v2.3)
 - `docs/design/phase1-design.md` — Phase 1 설계 스펙
 - `docs/plans/phase1-implementation.md` — Phase 1 구현 플랜 (11 tasks)
+
+### 다음 세션 즉시 TODO — 대시보드 그래프 개선
+
+유저 피드백 3건이 대기 중이다. 우선순위 순:
+
+1. **Scope 필터 패널**: `#graph-scope-filter` HTML은 이미 있고 CSS도 준비됨. scope 버튼을 렌더링하고, 클릭 시 해당 scope 관련 노드/엣지만 하이라이트(나머지 dim)하는 JS 로직 구현 필요. 다형성 scope는 빨간 테두리로 구분.
+
+2. **Scope 기준 뷰 (그래프 모드 전환)**: 현재는 "에이전트 기준" 뷰(Agent→Event 흐름)만 있음. "Scope 기준" 뷰를 추가하여, scope를 중심 노드로 놓고 교차 push/pull을 시각화. 그래프 상단에 뷰 모드 토글(Agent View / Scope View) 추가.
+
+3. **Broadcast push/pull 카운트**: broadcast는 push 1건이지만 여러 에이전트가 pull하므로, Overview의 push/pull 카운트가 이를 반영해야 함. 또한 graph에서 broadcast의 ghost 노드가 pull한 에이전트마다 생성되는지 확인.
 
 ### 아직 안 된 것 (Phase 1 범위 내)
 
@@ -65,6 +77,9 @@ cd server && uv run pytest tests/ -v
 # Dashboard
 # http://localhost:7777/dashboard (서버 실행 후)
 
+# Cross-agent test data 생성
+python server/tests/scenarios/crosstest.py
+
 # MCP 연결
 claude mcp add overmind --transport http http://localhost:7777/mcp
 ```
@@ -73,12 +88,15 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 
 | File | Purpose |
 |------|---------|
-| `server/overmind/models.py` | 모든 Pydantic 모델 (MemoryEvent, PushRequest 등) |
-| `server/overmind/store.py` | JSONL store 핵심 로직 (push/pull/graph/stats) |
+| `server/overmind/models.py` | 모든 Pydantic 모델 (MemoryEvent, GraphEdge 등) |
+| `server/overmind/store.py` | JSONL store 핵심 로직 (push/pull/graph/stats/pull_log) |
 | `server/overmind/api.py` | FastAPI REST 엔드포인트 (create_app) |
 | `server/overmind/mcp_server.py` | FastMCP 도구 래퍼 (create_mcp_server) |
 | `server/overmind/main.py` | 서버 진입점 (REST + MCP 동시 서빙) |
-| `server/overmind/dashboard/static/` | 대시보드 HTML/CSS/JS |
+| `server/overmind/dashboard/static/app.js` | 대시보드 JS (Overview + Graph + Timeline) |
+| `server/overmind/dashboard/static/style.css` | 대시보드 CSS (Hive Mind 테마) |
+| `server/overmind/dashboard/static/index.html` | 대시보드 HTML |
+| `server/tests/scenarios/crosstest.py` | 교차 push/pull 테스트 스크립트 (서버 실행 상태에서) |
 | `plugin/hooks/` | Claude Code 훅 (Python 스크립트) |
 | `plugin/scripts/api_client.py` | 훅용 공유 HTTP 클라이언트 |
 
