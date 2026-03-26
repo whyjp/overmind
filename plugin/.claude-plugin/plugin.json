@@ -1,0 +1,6 @@
+{
+  "name": "overmind-plugin",
+  "version": "0.1.0",
+  "description": "Overmind: distributed memory sync plugin for Claude Code",
+  "author": "whyjp"
+}
