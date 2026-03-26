@@ -26,7 +26,7 @@ def main() -> None:
 
     # Mount MCP at /mcp
     mcp = create_mcp_server(store)
-    app.mount("/mcp", mcp.streamable_http_app())
+    app.mount("/mcp", mcp.http_app())
 
     uvicorn.run(app, host=args.host, port=args.port)
 
