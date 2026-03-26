@@ -10,6 +10,11 @@ document.querySelectorAll('.tab').forEach(btn => {
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById(btn.dataset.tab).classList.add('active');
+        // Re-render graph/timeline when tab becomes visible (needs correct dimensions)
+        if (currentRepo) {
+            if (btn.dataset.tab === 'graph') loadGraph();
+            if (btn.dataset.tab === 'timeline') loadTimeline();
+        }
     });
 });
 
@@ -136,9 +141,10 @@ function renderGraph(data) {
     svg.selectAll('*').remove();
 
     const container = document.getElementById('graph-container');
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    svg.attr('viewBox', `0 0 ${width} ${height}`);
+    const width = container.clientWidth || 900;
+    const height = container.clientHeight || 600;
+    svg.attr('width', width).attr('height', height)
+       .attr('viewBox', `0 0 ${width} ${height}`);
 
     if (data.nodes.length === 0) {
         svg.append('text').attr('x', width / 2).attr('y', height / 2)
@@ -249,7 +255,7 @@ function renderTimeline(data) {
 
     const laneHeight = 80;
     const margin = { top: 40, right: 40, bottom: 40, left: 120 };
-    const width = Math.max(800, document.getElementById('timeline-container').clientWidth);
+    const width = Math.max(800, document.getElementById('timeline-container').clientWidth || 900);
     const height = margin.top + users.length * laneHeight + margin.bottom;
     svg.attr('viewBox', `0 0 ${width} ${height}`);
 
