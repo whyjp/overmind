@@ -8,6 +8,8 @@ from pathlib import Path
 import uvicorn
 
 from overmind.api import create_app
+from overmind.mcp_server import create_mcp_server
+from overmind.store import MemoryStore
 
 
 def main() -> None:
@@ -17,7 +19,15 @@ def main() -> None:
     parser.add_argument("--data-dir", type=str, default="data", help="Data directory (default: data)")
     args = parser.parse_args()
 
-    app = create_app(data_dir=Path(args.data_dir))
+    data_dir = Path(args.data_dir)
+    store = MemoryStore(data_dir=data_dir)
+
+    app = create_app(data_dir=data_dir, store=store)
+
+    # Mount MCP at /mcp
+    mcp = create_mcp_server(store)
+    app.mount("/mcp", mcp.streamable_http_app())
+
     uvicorn.run(app, host=args.host, port=args.port)
 
 

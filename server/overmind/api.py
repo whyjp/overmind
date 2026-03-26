@@ -23,13 +23,14 @@ from overmind.models import (
 from overmind.store import MemoryStore
 
 
-def create_app(data_dir: Optional[Path] = None) -> FastAPI:
+def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     if data_dir is None:
         data_dir = Path("data")
 
     data_dir = Path(data_dir)
-    store = MemoryStore(data_dir=data_dir)
+    if store is None:
+        store = MemoryStore(data_dir=data_dir)
 
     # Attempt cleanup on startup (best-effort, no repo_id required here)
     # cleanup_expired requires repo_id, so we skip global cleanup at startup
