@@ -12,8 +12,9 @@
         <h1>Overmind</h1>
         <div id="repo-selector">
             <label for="repo-id">Repo:</label>
-            <input type="text" id="repo-id" placeholder="github.com/user/project" />
-            <button id="btn-load" onclick="loadAll()">Load</button>
+            <select id="repo-id" onchange="loadAll()">
+                <option value="">-- select repo --</option>
+            </select>
         </div>
         <nav>
             <button class="tab active" data-tab="overview">Overview</button>

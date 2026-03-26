@@ -17,6 +17,29 @@ function closeDetail() {
     document.getElementById('detail-panel').classList.add('hidden');
 }
 
+// --- Repo list loading ---
+async function loadRepos() {
+    const res = await fetch(`${API_BASE}/api/repos`);
+    const repos = await res.json();
+    const select = document.getElementById('repo-id');
+    // Keep the default option
+    select.innerHTML = '<option value="">-- select repo --</option>';
+    for (const repo of repos) {
+        const opt = document.createElement('option');
+        opt.value = repo;
+        opt.textContent = repo;
+        select.appendChild(opt);
+    }
+    // Auto-select if only one repo
+    if (repos.length === 1) {
+        select.value = repos[0];
+        loadAll();
+    }
+}
+
+// Load repos on page load
+loadRepos();
+
 // --- Data loading ---
 async function loadAll() {
     currentRepo = document.getElementById('repo-id').value.trim();

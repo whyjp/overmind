@@ -47,6 +47,32 @@ class MemoryStore:
         self._seen_ids: dict[str, set[str]] = defaultdict(set)
 
     # ------------------------------------------------------------------
+    # Repo listing
+    # ------------------------------------------------------------------
+
+    def list_repos(self) -> list[str]:
+        """Return all known repo_ids by scanning the data directory."""
+        repos_dir = self.data_dir / "repos"
+        if not repos_dir.exists():
+            return []
+        result = []
+        for d in sorted(repos_dir.iterdir()):
+            if d.is_dir():
+                # Reverse the _safe_repo_id transform: _ back to /
+                # e.g. "github.com_user_project" -> "github.com/user/project"
+                name = d.name
+                # First underscore segment is the domain (github.com)
+                # We need to restore the slashes. Convention: domain_org_repo
+                parts = name.split("_")
+                if len(parts) >= 3 and "." in parts[0]:
+                    # domain.com_org_repo -> domain.com/org/repo
+                    repo_id = parts[0] + "/" + "/".join(parts[1:])
+                else:
+                    repo_id = name.replace("_", "/")
+                result.append(repo_id)
+        return result
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

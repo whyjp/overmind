@@ -45,6 +45,10 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
     if dashboard_dir.exists():
         app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
 
+    @app.get("/api/repos")
+    async def list_repos() -> list[str]:
+        return store.list_repos()
+
     @app.post("/api/memory/push", response_model=PushResponse)
     async def push_memory(request: PushRequest) -> PushResponse:
         events = [evt.to_event(request.repo_id, request.user) for evt in request.events]
