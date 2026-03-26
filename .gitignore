@@ -1,9 +1,49 @@
+# Python
 __pycache__/
 *.pyc
-.pytest_cache/
+*.pyo
 *.egg-info/
 dist/
 build/
 .venv/
+*.whl
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code (local settings, not shared)
+.claude/
+
+# Playwright MCP (screenshots, logs)
+.playwright-mcp/
+dashboard-*.png
+
+# Overmind runtime data
 server/data/
 .overmind_state.json
+
+# uv
+server/.python-version
+
+# Node (if any)
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.*.local
