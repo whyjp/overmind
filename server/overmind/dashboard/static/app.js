@@ -139,7 +139,6 @@ async function loadGraph() {
 function renderGraph(data) {
     const svg = d3.select('#graph-svg');
     svg.selectAll('*').remove();
-    // Remove any leftover popover
     d3.select('#graph-popover').remove();
 
     const container = document.getElementById('graph-container');
@@ -156,208 +155,269 @@ function renderGraph(data) {
     }
 
     const polyScopes = new Set(data.polymorphisms.map(p => p.scope));
-    const relationLabels = { pushed: 'pushed', affects: 'affects', pulled: 'pulled' };
 
-    // --- Simulation: stabilize then stop ---
-    const simulation = d3.forceSimulation(data.nodes)
-        .force('link', d3.forceLink(data.edges).id(d => d.id).distance(120).strength(0.8))
-        .force('charge', d3.forceManyBody().strength(-300))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(40))
-        .alphaDecay(0.05);  // faster cooldown
+    // --- Classify nodes into 3 columns ---
+    const users = data.nodes.filter(n => n.type === 'user');
+    const events = data.nodes.filter(n => n.type === 'event');
+    const scopes = data.nodes.filter(n => n.type === 'scope');
+
+    // Build lookup: which user pushed which events, which events affect which scopes
+    const userEvents = {};  // userId -> [eventIds]
+    const eventScopes = {}; // eventId -> [scopeIds]
+    data.edges.forEach(e => {
+        if (e.relation === 'pushed') {
+            (userEvents[e.source] = userEvents[e.source] || []).push(e.target);
+        }
+        if (e.relation === 'affects') {
+            (eventScopes[e.source] = eventScopes[e.source] || []).push(e.target);
+        }
+    });
+
+    // --- 3-column layout: Users | Events | Scopes ---
+    const colX = [140, width * 0.42, width * 0.78];
+    const legendW = 180; // space for legend on the left
+
+    // Position users vertically, evenly spaced
+    const userSpacing = Math.min(80, (height - 80) / Math.max(users.length, 1));
+    const userStartY = (height - (users.length - 1) * userSpacing) / 2;
+    users.forEach((u, i) => { u.x = colX[0]; u.y = userStartY + i * userSpacing; });
+
+    // Position events: group by user, vertically aligned with their user
+    const eventPositions = {};
+    let globalEventIndex = 0;
+    users.forEach(u => {
+        const evtIds = userEvents[u.id] || [];
+        const evtNodes = evtIds.map(id => events.find(e => e.id === id)).filter(Boolean);
+        const spacing = Math.min(55, (userSpacing * 0.9));
+        const startY = u.y - ((evtNodes.length - 1) * spacing) / 2;
+        evtNodes.forEach((evt, j) => {
+            evt.x = colX[1];
+            evt.y = startY + j * spacing;
+            eventPositions[evt.id] = { x: evt.x, y: evt.y };
+        });
+    });
+    // Events not attached to any user (shouldn't happen, but safety)
+    events.filter(e => e.x === undefined).forEach((e, i) => {
+        e.x = colX[1]; e.y = 40 + i * 50;
+    });
+
+    // Position scopes: collect y positions from connected events, average them
+    const scopeYs = {};
+    scopes.forEach(s => {
+        const connectedEventIds = data.edges
+            .filter(e => e.relation === 'affects' && e.target === s.id)
+            .map(e => e.source);
+        const ys = connectedEventIds.map(id => {
+            const evt = events.find(e => e.id === id);
+            return evt ? evt.y : height / 2;
+        });
+        s.x = colX[2];
+        s.y = ys.length > 0 ? ys.reduce((a, b) => a + b) / ys.length : height / 2;
+    });
+    // De-overlap scopes
+    scopes.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < scopes.length; i++) {
+        if (scopes[i].y - scopes[i - 1].y < 50) {
+            scopes[i].y = scopes[i - 1].y + 50;
+        }
+    }
+
+    // --- Column headers ---
+    svg.append('text').attr('x', colX[0]).attr('y', 24).attr('text-anchor', 'middle')
+       .attr('fill', '#484f58').attr('font-size', '12px').attr('font-weight', '600').text('AGENTS');
+    svg.append('text').attr('x', colX[1]).attr('y', 24).attr('text-anchor', 'middle')
+       .attr('fill', '#484f58').attr('font-size', '12px').attr('font-weight', '600').text('EVENTS');
+    svg.append('text').attr('x', colX[2]).attr('y', 24).attr('text-anchor', 'middle')
+       .attr('fill', '#484f58').attr('font-size', '12px').attr('font-weight', '600').text('SCOPES');
 
     const g = svg.append('g');
 
     // Zoom
-    const zoom = d3.zoom().scaleExtent([0.1, 4]).on('zoom', (e) => {
+    svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', (e) => {
         g.attr('transform', e.transform);
-    });
-    svg.call(zoom);
-    // Click on background dismisses popover
-    svg.on('click', (e) => {
-        if (e.target === svg.node()) dismissPopover();
-    });
+    }));
+    svg.on('click', (e) => { if (e.target === svg.node()) dismissPopover(); });
 
-    // --- Legend ---
-    const legend = svg.append('g').attr('transform', 'translate(16, 16)');
-    const legendItems = [
-        { shape: 'circle', color: '#58a6ff', label: 'User / Agent' },
-        { shape: 'rect', color: '#f85149', label: 'Correction' },
-        { shape: 'rect', color: '#d29922', label: 'Decision' },
-        { shape: 'rect', color: '#a371f7', label: 'Discovery' },
-        { shape: 'rect', color: '#f778ba', label: 'Broadcast' },
-        { shape: 'diamond', color: '#8b949e', label: 'Scope (file area)' },
-    ];
-    legendItems.forEach((item, i) => {
-        const row = legend.append('g').attr('transform', `translate(0, ${i * 22})`);
-        if (item.shape === 'circle') {
-            row.append('circle').attr('cx', 7).attr('cy', 7).attr('r', 6).attr('fill', item.color);
-        } else if (item.shape === 'diamond') {
-            row.append('rect').attr('x', 2).attr('y', 2).attr('width', 10).attr('height', 10)
-               .attr('fill', item.color).attr('rx', 2).attr('transform', 'rotate(45, 7, 7)');
-        } else {
-            row.append('rect').attr('x', 1).attr('y', 1).attr('width', 12).attr('height', 12)
-               .attr('fill', item.color).attr('rx', 2);
-        }
-        row.append('text').attr('x', 22).attr('y', 11).attr('fill', '#8b949e')
-           .attr('font-size', '11px').text(item.label);
-    });
-    // Edge legend
-    const edgeLegY = legendItems.length * 22 + 8;
-    const edgeLegend = [
-        { dash: '', color: '#58a6ff', label: 'pushed / affects' },
-        { dash: '5,5', color: '#8b949e', label: 'pulled' },
-        { dash: '', color: '#f85149', label: 'polymorphism conflict' },
-    ];
-    edgeLegend.forEach((item, i) => {
-        const row = legend.append('g').attr('transform', `translate(0, ${edgeLegY + i * 20})`);
-        row.append('line').attr('x1', 0).attr('y1', 8).attr('x2', 16).attr('y2', 8)
-           .attr('stroke', item.color).attr('stroke-width', 2)
-           .attr('stroke-dasharray', item.dash);
-        row.append('text').attr('x', 22).attr('y', 12).attr('fill', '#8b949e')
-           .attr('font-size', '11px').text(item.label);
-    });
-
-    // --- Edges with arrow markers ---
-    svg.append('defs').append('marker')
-        .attr('id', 'arrowhead').attr('viewBox', '0 0 10 6')
-        .attr('refX', 10).attr('refY', 3).attr('markerWidth', 8).attr('markerHeight', 6)
+    // --- Arrow marker ---
+    const defs = svg.append('defs');
+    defs.append('marker').attr('id', 'arr').attr('viewBox', '0 0 10 6')
+        .attr('refX', 10).attr('refY', 3).attr('markerWidth', 7).attr('markerHeight', 5)
         .attr('orient', 'auto')
         .append('path').attr('d', 'M0,0 L10,3 L0,6').attr('fill', '#484f58');
+    defs.append('marker').attr('id', 'arr-poly').attr('viewBox', '0 0 10 6')
+        .attr('refX', 10).attr('refY', 3).attr('markerWidth', 7).attr('markerHeight', 5)
+        .attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0 L10,3 L0,6').attr('fill', '#f85149');
 
-    const link = g.selectAll('.edge')
+    // --- Draw edges as curves ---
+    const linkGen = (sx, sy, tx, ty) => {
+        const mx = (sx + tx) / 2;
+        return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+    };
+
+    const link = g.selectAll('.edge-path')
         .data(data.edges)
-        .join('line')
-        .attr('marker-end', 'url(#arrowhead)')
-        .attr('class', d => {
-            let cls = 'edge';
-            if (d.relation === 'pulled') cls += ' edge-pulled';
-            const tid = typeof d.target === 'object' ? d.target.id : d.target;
-            if (polyScopes.has(tid)) cls += ' edge-polymorphism';
-            return cls;
+        .join('path')
+        .attr('fill', 'none')
+        .attr('stroke-width', d => {
+            const tid = d.target;
+            return polyScopes.has(tid) ? 2.5 : 1.5;
+        })
+        .attr('stroke', d => {
+            const tid = d.target;
+            if (polyScopes.has(tid)) return '#f85149';
+            if (d.relation === 'pulled') return '#58a6ff';
+            return '#30363d';
+        })
+        .attr('stroke-dasharray', d => d.relation === 'pulled' ? '6,4' : '')
+        .attr('marker-end', d => {
+            const tid = d.target;
+            return polyScopes.has(tid) ? 'url(#arr-poly)' : 'url(#arr)';
+        })
+        .attr('d', d => {
+            const sn = data.nodes.find(n => n.id === d.source);
+            const tn = data.nodes.find(n => n.id === d.target);
+            if (!sn || !tn) return '';
+            return linkGen(sn.x, sn.y, tn.x, tn.y);
         });
 
     // Edge labels
-    const edgeLabel = g.selectAll('.edge-label')
+    g.selectAll('.edge-label')
         .data(data.edges)
         .join('text')
         .attr('class', 'edge-label')
         .attr('text-anchor', 'middle')
-        .attr('fill', '#484f58')
+        .attr('fill', '#3d444d')
         .attr('font-size', '9px')
-        .text(d => relationLabels[d.relation] || '');
+        .attr('x', d => {
+            const sn = data.nodes.find(n => n.id === d.source);
+            const tn = data.nodes.find(n => n.id === d.target);
+            return sn && tn ? (sn.x + tn.x) / 2 : 0;
+        })
+        .attr('y', d => {
+            const sn = data.nodes.find(n => n.id === d.source);
+            const tn = data.nodes.find(n => n.id === d.target);
+            return sn && tn ? (sn.y + tn.y) / 2 - 6 : 0;
+        })
+        .text(d => d.relation);
 
-    // --- Nodes ---
-    const nodeSize = d => d.type === 'user' ? 16 : d.type === 'scope' ? 12 : 10;
-    const nodeClass = d => {
-        if (d.type === 'user') return 'node-user';
-        if (d.type === 'scope') return 'node-scope' + (polyScopes.has(d.id) ? ' polymorphism-glow' : '');
-        return `node-event node-event-${d.event_type || 'change'}`;
+    // --- Draw nodes ---
+    const colorMap = {
+        correction: '#f85149', decision: '#d29922', discovery: '#a371f7',
+        change: '#3fb950', broadcast: '#f778ba',
     };
 
-    const node = g.selectAll('.node')
-        .data(data.nodes)
-        .join('g')
-        .attr('class', d => 'node' + (d.type === 'user' ? ' node-group-user' : ''))
-        .attr('cursor', 'pointer')
-        .call(d3.drag()
-            .on('start', (e, d) => {
-                if (!e.active) simulation.alphaTarget(0.1).restart();
-                d.fx = d.x; d.fy = d.y;
-            })
-            .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
-            .on('end', (e, d) => {
-                if (!e.active) simulation.alphaTarget(0);
-                // Pin the dragged node in place
-                d.fx = d.x; d.fy = d.y;
-            })
-        );
+    // User nodes
+    const userG = g.selectAll('.user-node')
+        .data(users).join('g')
+        .attr('class', 'node').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    userG.append('circle').attr('r', 18).attr('fill', '#58a6ff').attr('opacity', 0.15)
+         .attr('stroke', '#58a6ff').attr('stroke-width', 2);
+    userG.append('text').attr('text-anchor', 'middle').attr('dy', 5)
+         .attr('fill', '#58a6ff').attr('font-size', '12px').attr('font-weight', '600')
+         .text(d => (d.label || d.id).replace('user:', ''));
 
-    node.each(function(d) {
-        const el = d3.select(this);
-        if (d.type === 'user') {
-            el.append('circle').attr('r', nodeSize(d)).attr('class', nodeClass(d));
-        } else if (d.type === 'scope') {
-            // Diamond shape for scope
-            const s = nodeSize(d);
-            el.append('rect')
-                .attr('width', s * 1.6).attr('height', s * 1.6)
-                .attr('x', -s * 0.8).attr('y', -s * 0.8)
-                .attr('rx', 3)
-                .attr('class', nodeClass(d))
-                .attr('transform', 'rotate(45)');
-        } else {
-            const s = nodeSize(d);
-            el.append('rect')
-                .attr('width', s * 2).attr('height', s * 2)
-                .attr('x', -s).attr('y', -s)
-                .attr('rx', 3)
-                .attr('class', nodeClass(d));
-        }
-    });
-
-    // Labels
-    node.append('text')
-        .attr('class', 'node-label')
-        .attr('dy', d => nodeSize(d) + 16)
-        .attr('text-anchor', 'middle')
+    // Event nodes
+    const evtG = g.selectAll('.event-node')
+        .data(events).join('g')
+        .attr('class', 'node').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    evtG.append('rect')
+        .attr('width', 180).attr('height', 36).attr('x', -90).attr('y', -18)
+        .attr('rx', 6)
+        .attr('fill', d => {
+            const c = colorMap[d.event_type] || '#3fb950';
+            return c + '22';  // low opacity fill
+        })
+        .attr('stroke', d => colorMap[d.event_type] || '#3fb950')
+        .attr('stroke-width', 1.5);
+    // Type badge
+    evtG.append('rect')
+        .attr('width', d => d.event_type ? d.event_type.length * 6.5 + 8 : 40)
+        .attr('height', 14).attr('x', -87).attr('y', -14).attr('rx', 3)
+        .attr('fill', d => colorMap[d.event_type] || '#3fb950');
+    evtG.append('text').attr('x', -83).attr('y', -4)
+        .attr('fill', '#fff').attr('font-size', '9px').attr('font-weight', '600')
+        .text(d => d.event_type || 'event');
+    // Result text
+    evtG.append('text').attr('x', -83).attr('y', 12)
+        .attr('fill', '#c9d1d9').attr('font-size', '10px')
         .text(d => {
-            if (d.type === 'user') return d.label || d.id;
-            if (d.type === 'scope') return d.label || d.id;
-            // For events, show short result
-            return (d.label || d.id).substring(0, 25);
+            const label = d.label || d.id;
+            return label.length > 28 ? label.substring(0, 28) + '...' : label;
         });
 
-    // --- Click: floating popover near node ---
-    let selectedNode = null;
-    node.on('click', (e, d) => {
+    // Scope nodes
+    const scopeG = g.selectAll('.scope-node')
+        .data(scopes).join('g')
+        .attr('class', 'node').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    scopeG.append('rect')
+        .attr('width', 120).attr('height', 30).attr('x', -60).attr('y', -15)
+        .attr('rx', 15)
+        .attr('fill', d => polyScopes.has(d.id) ? '#f8514922' : '#161b22')
+        .attr('stroke', d => polyScopes.has(d.id) ? '#f85149' : '#30363d')
+        .attr('stroke-width', d => polyScopes.has(d.id) ? 2 : 1);
+    scopeG.append('text').attr('text-anchor', 'middle').attr('dy', 4)
+        .attr('fill', d => polyScopes.has(d.id) ? '#f85149' : '#8b949e')
+        .attr('font-size', '11px').attr('font-weight', d => polyScopes.has(d.id) ? '600' : '400')
+        .text(d => (d.label || d.id).replace('scope:', ''));
+    // Polymorphism warning icon
+    scopes.filter(s => polyScopes.has(s.id)).forEach(s => {
+        const sg = scopeG.filter(d => d.id === s.id);
+        sg.append('text').attr('x', 48).attr('y', -8)
+           .attr('fill', '#f85149').attr('font-size', '14px').text('\u26A0');
+    });
+
+    // --- Click handler: popover + focus ---
+    const allNodeGroups = g.selectAll('.node');
+    allNodeGroups.on('click', (e, d) => {
         e.stopPropagation();
-        selectedNode = d;
 
-        // Highlight connected edges
-        link.attr('opacity', edge => {
-            const sid = typeof edge.source === 'object' ? edge.source.id : edge.source;
-            const tid = typeof edge.target === 'object' ? edge.target.id : edge.target;
-            return (sid === d.id || tid === d.id) ? 1 : 0.15;
-        });
-        node.attr('opacity', n => {
-            if (n.id === d.id) return 1;
-            // Check if connected
-            const connected = data.edges.some(edge => {
-                const sid = typeof edge.source === 'object' ? edge.source.id : edge.source;
-                const tid = typeof edge.target === 'object' ? edge.target.id : edge.target;
-                return (sid === d.id && tid === n.id) || (tid === d.id && sid === n.id);
-            });
-            return connected ? 1 : 0.2;
+        // Highlight connected
+        const connectedIds = new Set([d.id]);
+        data.edges.forEach(edge => {
+            if (edge.source === d.id || edge.target === d.id) {
+                connectedIds.add(edge.source);
+                connectedIds.add(edge.target);
+            }
         });
 
-        showPopover(d, e);
+        allNodeGroups.attr('opacity', n => connectedIds.has(n.id) ? 1 : 0.15);
+        link.attr('opacity', edge => (edge.source === d.id || edge.target === d.id) ? 1 : 0.08);
+
+        showPopover(d, e, data);
     });
 
-    // --- Simulation tick ---
-    simulation.on('tick', () => {
-        link
-            .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-        edgeLabel
-            .attr('x', d => (d.source.x + d.target.x) / 2)
-            .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
-        node.attr('transform', d => `translate(${d.x},${d.y})`);
+    // --- Legend (bottom-left) ---
+    const legend = svg.append('g').attr('transform', `translate(16, ${height - 100})`);
+    const items = [
+        { color: '#58a6ff', label: 'Agent' },
+        { color: '#f85149', label: 'Correction' },
+        { color: '#d29922', label: 'Decision' },
+        { color: '#a371f7', label: 'Discovery' },
+        { color: '#f778ba', label: 'Broadcast' },
+    ];
+    items.forEach((item, i) => {
+        const x = i * 100;
+        legend.append('rect').attr('x', x).attr('y', 0).attr('width', 10).attr('height', 10)
+              .attr('rx', item.color === '#58a6ff' ? 5 : 2).attr('fill', item.color);
+        legend.append('text').attr('x', x + 14).attr('y', 9)
+              .attr('fill', '#8b949e').attr('font-size', '10px').text(item.label);
     });
+    legend.append('line').attr('x1', 0).attr('y1', 22).attr('x2', 20).attr('y2', 22)
+          .attr('stroke', '#f85149').attr('stroke-width', 2);
+    legend.append('text').attr('x', 24).attr('y', 26)
+          .attr('fill', '#8b949e').attr('font-size', '10px').text('= polymorphism conflict');
 
-    // Stop simulation after layout stabilizes
-    simulation.on('end', () => {
-        // Fix all nodes in place after stabilization
-        data.nodes.forEach(d => { d.fx = d.x; d.fy = d.y; });
-    });
-
-    // --- Popover functions ---
-    function showPopover(d, event) {
+    function showPopover(d, event, graphData) {
         dismissPopover();
         const popover = document.createElement('div');
         popover.id = 'graph-popover';
 
-        let html = `<div class="popover-header">${d.type.toUpperCase()}: ${(d.label || d.id)}</div>`;
+        const name = (d.label || d.id).replace(/^(user|event|scope):/, '');
+        let html = `<div class="popover-header">${d.type.toUpperCase()}: ${name}</div>`;
 
         if (d.type === 'event' && d.data) {
             if (d.data.result) html += `<div class="popover-row"><b>Result:</b> ${d.data.result}</div>`;
@@ -366,9 +426,21 @@ function renderGraph(data) {
                 d.data.process.forEach(p => { html += `<div class="popover-step">&rarr; ${p}</div>`; });
             }
             if (d.data.ts) html += `<div class="popover-row muted">${new Date(d.data.ts).toLocaleString()}</div>`;
+        } else if (d.type === 'user') {
+            const evtCount = (userEvents[d.id] || []).length;
+            html += `<div class="popover-row">Pushed ${evtCount} event(s)</div>`;
         } else if (d.type === 'scope') {
-            const poly = data.polymorphisms.find(p => p.scope === d.id);
-            if (poly) {
+            const poly = graphData.polymorphisms.find(p => p.scope === (d.label || d.id));
+            if (!poly) {
+                // Also try with scope: prefix stripped
+                const scopeLabel = (d.label || d.id).replace('scope:', '');
+                const poly2 = graphData.polymorphisms.find(p => p.scope === scopeLabel);
+                if (poly2) {
+                    html += `<div class="popover-row popover-warn">Polymorphism detected!</div>`;
+                    html += `<div class="popover-row">Users: ${poly2.users.join(', ')}</div>`;
+                    poly2.intents.forEach(i => { html += `<div class="popover-step">&bull; ${i}</div>`; });
+                }
+            } else {
                 html += `<div class="popover-row popover-warn">Polymorphism detected!</div>`;
                 html += `<div class="popover-row">Users: ${poly.users.join(', ')}</div>`;
                 poly.intents.forEach(i => { html += `<div class="popover-step">&bull; ${i}</div>`; });
@@ -378,11 +450,9 @@ function renderGraph(data) {
         popover.innerHTML = html;
         container.appendChild(popover);
 
-        // Position near mouse, within bounds
         const rect = container.getBoundingClientRect();
         let left = event.clientX - rect.left + 16;
         let top = event.clientY - rect.top - 10;
-        // Keep within container
         const pw = 320, ph = popover.offsetHeight || 200;
         if (left + pw > rect.width) left = left - pw - 32;
         if (top + ph > rect.height) top = rect.height - ph - 8;

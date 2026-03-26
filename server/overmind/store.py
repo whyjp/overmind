@@ -275,8 +275,9 @@ class MemoryStore:
                 GraphNode(
                     id=f"event:{evt.id}",
                     type="event",
-                    label=evt.id,
+                    label=evt.result[:60] if evt.result else evt.id,
                     event_type=evt.type,
+                    data={"result": evt.result, "process": evt.process, "ts": evt.ts},
                 )
             )
             edges.append(
