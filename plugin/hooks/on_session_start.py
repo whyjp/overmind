@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
 from api_client import get_repo_id, get_user, load_state, save_state, api_get
+from formatter import format_session_start
 
 
 def main():
@@ -33,16 +34,9 @@ def main():
     state["last_pull_ts"] = datetime.now(timezone.utc).isoformat()
     save_state(state)
 
-    lines = [f"Overmind: {result['count']} team events since last session:"]
-    for evt in result["events"]:
-        prefix = "!" if evt.get("priority") == "urgent" else "-"
-        lines.append(f"  {prefix} [{evt['type']}] {evt['user']}: {evt['result']}")
-        if evt.get("process"):
-            for step in evt["process"][:3]:
-                lines.append(f"      > {step}")
-
-    output = {"systemMessage": "\n".join(lines)}
-    print(json.dumps(output))
+    message = format_session_start(result["events"])
+    if message:
+        print(json.dumps({"systemMessage": message}))
 
 
 if __name__ == "__main__":

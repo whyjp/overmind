@@ -113,6 +113,13 @@ def seed_events(server, base_url):
                 "result": "Redis cache TTL set to 1 hour",
                 "files": ["src/cache/config.ts"],
             },
+            {
+                "id": "e2e_003", "type": "correction",
+                "ts": "2026-03-26T02:00:00Z",
+                "result": "DO NOT modify deploy scripts directly",
+                "files": ["src/deploy/run.sh"],
+                "priority": "urgent",
+            },
         ],
     })
 
@@ -173,9 +180,10 @@ class TestSessionStartHook:
         assert "systemMessage" in output
 
         msg = output["systemMessage"]
-        assert "Overmind:" in msg
-        assert "team events" in msg
+        assert "[OVERMIND]" in msg
         assert "dev_a" in msg
+        # correction → RULES section, decision → RULES section
+        assert "RULES" in msg or "CONTEXT" in msg
         # Should contain the seeded auth event
         assert "auth" in msg or "bcrypt" in msg or "argon2" in msg
 
@@ -199,6 +207,7 @@ class TestPreToolUseHook:
         assert stdout, "Hook produced no output for auth scope"
         output = json.loads(stdout)
         msg = output["systemMessage"]
+        assert "[OVERMIND]" in msg
         assert "src/auth/*" in msg
         assert "dev_a" in msg
 
@@ -219,3 +228,19 @@ class TestPreToolUseHook:
         })
         stdout = run_hook("on_pre_tool_use.py", env, stdin_data=stdin_data)
         assert stdout == ""
+
+    def test_urgent_correction_blocks_edit(self, server, base_url, state_dir, seed_events):
+        """Urgent correction in scope → tool use BLOCKED."""
+        env = _make_hook_env(base_url, state_dir, "dev_b", "pretool_block")
+        stdin_data = json.dumps({
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "src/deploy/config.sh"},
+        })
+        stdout = run_hook("on_pre_tool_use.py", env, stdin_data=stdin_data)
+
+        assert stdout, "Hook should produce blocking output"
+        output = json.loads(stdout)
+        hook_output = output.get("hookSpecificOutput", {})
+        assert hook_output.get("permissionDecision") == "deny"
+        assert "OVERMIND BLOCK" in hook_output.get("permissionDecisionReason", "")
+        assert "deploy" in hook_output.get("permissionDecisionReason", "").lower()

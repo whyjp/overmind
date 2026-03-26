@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: pull related events when editing files."""
+"""PreToolUse hook: pull related events when editing files.
+
+If urgent corrections exist for the target scope, BLOCK the tool use.
+Otherwise, inject context as systemMessage.
+"""
 
 import json
 import sys
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
 from api_client import get_repo_id, get_user, api_get
+from formatter import format_pre_tool_use
 
 
 def file_to_scope(file_path: str) -> str:
@@ -41,13 +46,32 @@ def main():
     if not result or result.get("count", 0) == 0:
         return
 
-    lines = [f"Overmind: {result['count']} related events in {scope}:"]
-    for evt in result["events"]:
-        prefix = "!" if evt.get("priority") == "urgent" else "-"
-        lines.append(f"  {prefix} [{evt['type']}] {evt['user']}: {evt['result']}")
+    events = result["events"]
 
-    output = {"systemMessage": "\n".join(lines)}
-    print(json.dumps(output))
+    # Check for blocking rules: urgent corrections/decisions for this scope
+    blocking_rules = [
+        evt for evt in events
+        if evt.get("priority") == "urgent"
+        and evt.get("type") in ("correction", "decision")
+    ]
+
+    if blocking_rules:
+        reasons = [evt["result"] for evt in blocking_rules]
+        reason = " | ".join(reasons)
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"[OVERMIND BLOCK] Team rule for {scope}: {reason}",
+            }
+        }
+        print(json.dumps(output))
+        return
+
+    # Non-blocking: inject context as systemMessage
+    message = format_pre_tool_use(events, scope)
+    if message:
+        print(json.dumps({"systemMessage": message}))
 
 
 if __name__ == "__main__":
