@@ -1,20 +1,38 @@
 {
-  "hooks": [
-    {
-      "event": "SessionStart",
-      "command": "python hooks/on_session_start.py",
-      "timeout": 5000
-    },
-    {
-      "event": "SessionEnd",
-      "command": "python hooks/on_session_end.py",
-      "timeout": 5000
-    },
-    {
-      "event": "PreToolUse",
-      "matcher": { "tool_name": "^(Write|Edit)$" },
-      "command": "python hooks/on_pre_tool_use.py",
-      "timeout": 3000
-    }
-  ]
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/on_session_start.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/on_session_end.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "matcher": "^(Write|Edit)$",
+            "command": "python hooks/on_pre_tool_use.py",
+            "timeout": 3000
+          }
+        ]
+      }
+    ]
+  }
 }
