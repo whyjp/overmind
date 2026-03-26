@@ -454,7 +454,42 @@ function renderFlowView(data) {
             .attr('data-tgt', d.tgtId || '');
     });
 
-    // --- Event dots ---
+    // --- Ghost dots: transparent replica at puller's row showing "received here" ---
+    // For each pull edge, place a faint copy of the source event dot at the
+    // source event's x position but on the puller's y row.
+    const ghostSeen = new Set();
+    flowEdges.forEach((d, i) => {
+        const srcEvt = events.find(e => e.id === d.srcId);
+        if (!srcEvt) return;
+        const ghostKey = `${d.srcId}@${d.puller}`;
+        if (ghostSeen.has(ghostKey)) return;
+        ghostSeen.add(ghostKey);
+
+        const gx = evtPos[d.srcId].x;
+        const gy = yScale(d.puller) + yScale.bandwidth() / 2;
+        const dim = edgeDimmed(i);
+
+        const ghost = g.append('g')
+            .attr('class', 'flow-ghost')
+            .attr('transform', `translate(${gx},${gy})`)
+            .attr('opacity', dim ? 0.03 : 0.12);
+
+        // Ghost outer ring (same type color, very faint)
+        ghost.append('circle')
+            .attr('r', dotR + 2)
+            .attr('fill', 'none')
+            .attr('stroke', C[srcEvt.type] || C.change)
+            .attr('stroke-width', 1)
+            .attr('stroke-dasharray', '3,2');
+
+        // Ghost inner dot
+        ghost.append('circle')
+            .attr('r', dotR - 2)
+            .attr('fill', C[srcEvt.type] || C.change)
+            .attr('opacity', 0.4);
+    });
+
+    // --- Event dots (solid push events) ---
     const evtGroups = g.selectAll('.flow-evt')
         .data(events).join('g')
         .attr('class', 'flow-evt')
