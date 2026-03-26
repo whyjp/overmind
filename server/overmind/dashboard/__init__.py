@@ -1,0 +1,1 @@
+"""Overmind dashboard static files."""

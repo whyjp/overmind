@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Overmind Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Overmind</h1>
+        <div id="repo-selector">
+            <label for="repo-id">Repo:</label>
+            <input type="text" id="repo-id" placeholder="github.com/user/project" />
+            <button id="btn-load" onclick="loadAll()">Load</button>
+        </div>
+        <nav>
+            <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="graph">Graph</button>
+            <button class="tab" data-tab="timeline">Timeline</button>
+        </nav>
+    </header>
+
+    <main>
+        <section id="overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-pushes">-</div>
+                    <div class="stat-label">Total Pushes</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-pulls">-</div>
+                    <div class="stat-label">Total Pulls</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-users">-</div>
+                    <div class="stat-label">Active Users</div>
+                </div>
+            </div>
+            <div id="type-chart"></div>
+            <div id="recent-events">
+                <h3>Recent Events</h3>
+                <table id="events-table">
+                    <thead>
+                        <tr><th>Time</th><th>User</th><th>Type</th><th>Result</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="graph" class="tab-content">
+            <div id="graph-container">
+                <svg id="graph-svg"></svg>
+            </div>
+            <div id="detail-panel" class="hidden">
+                <button onclick="closeDetail()">&times;</button>
+                <pre id="detail-content"></pre>
+            </div>
+        </section>
+
+        <section id="timeline" class="tab-content">
+            <div id="timeline-container">
+                <svg id="timeline-svg"></svg>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
