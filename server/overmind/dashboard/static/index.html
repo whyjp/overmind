@@ -115,7 +115,14 @@
 
         <!-- GRAPH -->
         <section id="graph" class="tab-content">
-            <div id="graph-scope-filter"></div>
+            <div id="graph-toolbar">
+                <div id="graph-view-toggle">
+                    <button class="view-btn active" data-view="flow">Flow View</button>
+                    <button class="view-btn" data-view="agent">Agent View</button>
+                    <button class="view-btn" data-view="scope">Scope View</button>
+                </div>
+                <div id="graph-scope-filter"></div>
+            </div>
             <div id="graph-container">
                 <svg id="graph-svg"></svg>
             </div>

@@ -257,11 +257,15 @@ class MemoryStore:
         for evt in filtered:
             events_by_type[evt.type] += 1
 
+        # Count unique (puller, event_id) pairs from pull log
+        pull_log_entries = self._pull_log.get(repo_id, [])
+        unique_pulls = len({(e["puller"], e["event_id"]) for e in pull_log_entries})
+
         return ReportResponse(
             repo_id=repo_id,
             period=period,
             total_pushes=len(filtered),
-            total_pulls=0,
+            total_pulls=unique_pulls,
             unique_users=unique_users,
             events_by_type=dict(events_by_type),
         )
@@ -379,6 +383,79 @@ class MemoryStore:
             )
 
         return GraphResponse(nodes=nodes, edges=edges, polymorphisms=polymorphisms)
+
+    def get_flow_data(self, repo_id: str) -> dict:
+        """Return chronological flow data: push events + pull links (no ghosts).
+
+        Returns:
+            {
+                "agents": ["dev_a", "dev_b", ...],
+                "events": [{id, user, type, result, ts, scope, files}, ...],
+                "pull_links": [{puller, event_id, event_user, ts}, ...],
+                "polymorphisms": [...]
+            }
+        """
+        all_events = self._read_repo_events(repo_id)
+
+        # Sort events chronologically
+        all_events.sort(key=lambda e: _parse_ts(e.ts))
+
+        agents = sorted({e.user for e in all_events})
+        events = [
+            {
+                "id": e.id,
+                "user": e.user,
+                "type": e.type,
+                "result": e.result,
+                "ts": e.ts,
+                "scope": e.scope,
+                "files": e.files,
+                "process": e.process,
+                "priority": e.priority,
+            }
+            for e in all_events
+        ]
+
+        # Pull links: deduplicated (puller, event_id) pairs
+        pull_seen: set[tuple[str, str]] = set()
+        pull_links = []
+        for entry in self._pull_log.get(repo_id, []):
+            key = (entry["puller"], entry["event_id"])
+            if key in pull_seen:
+                continue
+            if entry["puller"] == entry.get("event_user", ""):
+                continue
+            pull_seen.add(key)
+            pull_links.append({
+                "puller": entry["puller"],
+                "event_id": entry["event_id"],
+                "event_user": entry.get("event_user", ""),
+                "ts": entry.get("ts", ""),
+            })
+
+        # Polymorphism detection
+        scope_users: dict[str, set[str]] = defaultdict(set)
+        scope_intents: dict[str, list[str]] = defaultdict(list)
+        for evt in all_events:
+            scopes = {_file_to_scope(f) for f in evt.files}
+            if evt.scope:
+                scopes.add(evt.scope)
+            for scope in scopes:
+                scope_users[scope].add(evt.user)
+                scope_intents[scope].append(evt.result)
+
+        polymorphisms = [
+            {"scope": scope, "users": sorted(users), "intents": scope_intents[scope]}
+            for scope, users in scope_users.items()
+            if len(users) > 1
+        ]
+
+        return {
+            "agents": agents,
+            "events": events,
+            "pull_links": pull_links,
+            "polymorphisms": polymorphisms,
+        }
 
     # ------------------------------------------------------------------
     # Cleanup

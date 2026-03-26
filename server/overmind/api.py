@@ -23,7 +23,7 @@ from overmind.models import (
 from overmind.store import MemoryStore
 
 
-def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = None) -> FastAPI:
+def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = None, lifespan=None) -> FastAPI:
     """Create and configure the FastAPI application."""
     if data_dir is None:
         data_dir = Path("data")
@@ -35,10 +35,7 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
     # Attempt cleanup on startup (best-effort, no repo_id required here)
     # cleanup_expired requires repo_id, so we skip global cleanup at startup
 
-    # In-memory pull counter per repo
-    pull_counts: dict[str, int] = defaultdict(int)
-
-    app = FastAPI(title="Overmind Memory Sync Server")
+    app = FastAPI(title="Overmind Memory Sync Server", lifespan=lifespan)
 
     # Mount dashboard static files if directory exists
     dashboard_dir = Path(__file__).parent / "dashboard" / "static"
@@ -64,7 +61,6 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
         exclude_user: Optional[str] = Query(default=None),
         limit: int = Query(default=100),
     ) -> PullResponse:
-        pull_counts[repo_id] += 1
         return store.pull(
             repo_id,
             since=since,
@@ -101,14 +97,15 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
         until: Optional[str] = Query(default=None),
         period: str = Query(default="7d"),
     ) -> ReportResponse:
-        stats = store.get_repo_stats(repo_id, since=since, until=until, period=period)
-        # Inject tracked pull count
-        stats.total_pulls = pull_counts.get(repo_id, 0)
-        return stats
+        return store.get_repo_stats(repo_id, since=since, until=until, period=period)
 
     @app.get("/api/report/graph")
     async def get_report_graph(repo_id: str = Query(...)):
         return store.get_graph_data(repo_id)
+
+    @app.get("/api/report/flow")
+    async def get_report_flow(repo_id: str = Query(...)):
+        return store.get_flow_data(repo_id)
 
     @app.get("/api/report/timeline")
     async def get_report_timeline(repo_id: str = Query(...)):

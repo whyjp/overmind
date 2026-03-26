@@ -5,7 +5,11 @@
 const API = window.location.origin;
 let currentRepo = '';
 let graphData = null;
+let flowData = null;
 let timelineData = null;
+let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
+let activeScope = null; // currently selected scope filter
+let activeAgent = null; // currently selected agent filter (flow view)
 
 // --- Color palette ---
 const C = {
@@ -28,6 +32,18 @@ document.querySelectorAll('.tab').forEach(btn => {
     });
 });
 
+// --- View toggle ---
+document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        graphViewMode = btn.dataset.view;
+        activeScope = null;
+        activeAgent = null;
+        renderGraph(graphData);
+    });
+});
+
 // --- Repo loading ---
 (async function loadRepos() {
     const res = await fetch(`${API}/api/repos`);
@@ -45,7 +61,7 @@ document.querySelectorAll('.tab').forEach(btn => {
 async function loadAll() {
     currentRepo = document.getElementById('repo-id').value;
     if (!currentRepo) return;
-    await Promise.all([loadOverview(), loadGraphData(), loadTimelineData()]);
+    await Promise.all([loadOverview(), loadGraphData(), loadFlowData(), loadTimelineData()]);
 }
 
 // ============================================================
@@ -156,15 +172,368 @@ async function loadGraphData() {
     }
 }
 
+async function loadFlowData() {
+    const res = await fetch(`${API}/api/report/flow?repo_id=${enc(currentRepo)}`);
+    flowData = await res.json();
+}
+
 function renderGraph(data) {
     if (!data) return;
+    if (graphViewMode === 'flow') return renderFlowView(flowData || data);
+    if (graphViewMode === 'scope') return renderGraphScopeView(data);
+    renderGraphAgentView(data);
+}
+
+function renderScopeFilterPanel(data, scopes, polyScopes) {
+    const filterPanel = document.getElementById('graph-scope-filter');
+    filterPanel.innerHTML = '';
+
+    if (!scopes.length) return;
+
+    const label = document.createElement('span');
+    label.className = 'scope-label';
+    label.textContent = 'Scope:';
+    filterPanel.appendChild(label);
+
+    // "All" button
+    const allBtn = document.createElement('button');
+    allBtn.className = 'scope-btn' + (activeScope === null ? ' active' : '');
+    allBtn.textContent = 'All';
+    allBtn.addEventListener('click', () => {
+        activeScope = null;
+        renderGraph(data);
+    });
+    filterPanel.appendChild(allBtn);
+
+    scopes.forEach(s => {
+        const scopeLabel = (s.label || s.id).replace('scope:', '');
+        if (scopeLabel === '*') return;
+        const btn = document.createElement('button');
+        const isPoly = polyScopes.has(s.id) || polyScopes.has(scopeLabel);
+        btn.className = 'scope-btn' + (isPoly ? ' poly' : '') + (activeScope === s.id ? ' active' : '');
+        btn.textContent = scopeLabel;
+        btn.addEventListener('click', () => {
+            activeScope = activeScope === s.id ? null : s.id;
+            renderGraph(data);
+        });
+        filterPanel.appendChild(btn);
+    });
+}
+
+function buildScopeConnectedSet(data, scopeId) {
+    // Find all nodes connected to this scope
+    const conn = new Set([scopeId]);
+    // Events that affect this scope
+    data.edges.forEach(e => {
+        if (e.relation === 'affects' && e.target === scopeId) {
+            conn.add(e.source); // event
+            // Find user who pushed this event
+            data.edges.forEach(e2 => {
+                if (e2.target === e.source && e2.relation === 'pushed') conn.add(e2.source);
+                // Ghost edges from this event
+                if (e2.source === e.source && e2.relation === 'pulled') {
+                    conn.add(e2.target); // ghost
+                    // Find consumer of ghost
+                    data.edges.forEach(e3 => {
+                        if (e3.target === e2.target && e3.relation === 'consumed') conn.add(e3.source);
+                    });
+                }
+            });
+        }
+    });
+    return conn;
+}
+
+// ============================================================
+// FLOW VIEW — 3-axis: X=time, Y=agents, Z=push/pull
+// ============================================================
+function renderFlowView(data) {
     const svg = d3.select('#graph-svg');
     svg.selectAll('*').remove();
     dismissPopover();
 
-    // Scope filter panel
     const filterPanel = document.getElementById('graph-scope-filter');
     filterPanel.innerHTML = '';
+
+    const container = document.getElementById('graph-container');
+    const W = container.clientWidth || 900;
+    const H = container.clientHeight || 600;
+
+    if (!data || !data.events || !data.events.length) {
+        svg.attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+        svg.append('text').attr('x', W / 2).attr('y', H / 2)
+            .attr('text-anchor', 'middle').attr('fill', '#364152').attr('font-size', '14px')
+            .text('No flow data. Run crosstest to generate push-pull cycles.');
+        return;
+    }
+
+    const agents = data.agents || [];
+    const events = data.events || [];
+    const pullLinks = data.pull_links || [];
+
+    // Agent filter panel
+    const agentLabel = document.createElement('span');
+    agentLabel.className = 'scope-label';
+    agentLabel.textContent = 'Agent:';
+    filterPanel.appendChild(agentLabel);
+
+    const allBtn = document.createElement('button');
+    allBtn.className = 'scope-btn' + (activeAgent === null ? ' active' : '');
+    allBtn.textContent = 'All';
+    allBtn.addEventListener('click', () => { activeAgent = null; renderGraph(graphData); });
+    filterPanel.appendChild(allBtn);
+
+    agents.forEach(a => {
+        const btn = document.createElement('button');
+        btn.className = 'scope-btn' + (activeAgent === a ? ' active' : '');
+        btn.textContent = a;
+        btn.addEventListener('click', () => {
+            activeAgent = activeAgent === a ? null : a;
+            renderGraph(graphData);
+        });
+        filterPanel.appendChild(btn);
+    });
+
+    // Layout — one row per agent, push events as dots, pull = cross-agent edges
+    const margin = { top: 56, right: 40, bottom: 44, left: 120 };
+    const laneH = Math.max(60, Math.min(100, (H - margin.top - margin.bottom) / agents.length));
+    const totalH = Math.max(H, margin.top + agents.length * laneH + margin.bottom);
+    const dotR = 8;
+
+    svg.attr('width', W).attr('height', totalH).attr('viewBox', `0 0 ${W} ${totalH}`);
+
+    // Time scale
+    const timeExtent = d3.extent(events, d => new Date(d.ts));
+    const pad = (timeExtent[1] - timeExtent[0]) * 0.08 || 3600000;
+    const xScale = d3.scaleTime()
+        .domain([new Date(timeExtent[0] - pad), new Date(+timeExtent[1] + pad)])
+        .range([margin.left + 20, W - margin.right - 20]);
+
+    // Agent Y scale
+    const yScale = d3.scaleBand()
+        .domain(agents)
+        .range([margin.top, margin.top + agents.length * laneH])
+        .padding(0.2);
+
+    const g = svg.append('g');
+    svg.call(d3.zoom().scaleExtent([0.3, 4]).on('zoom', e => g.attr('transform', e.transform)));
+    svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
+
+    // Defs
+    const defs = svg.append('defs');
+    defs.append('marker').attr('id', 'a-flow-pull').attr('viewBox', '0 0 8 6')
+        .attr('refX', 8).attr('refY', 3).attr('markerWidth', 5).attr('markerHeight', 4)
+        .attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0.5 L7,3 L0,5.5').attr('fill', 'rgba(0,229,160,0.8)');
+
+    // Swimlane backgrounds + labels
+    agents.forEach((agent, i) => {
+        g.append('rect')
+            .attr('x', margin.left).attr('width', W - margin.left - margin.right)
+            .attr('y', yScale(agent)).attr('height', yScale.bandwidth())
+            .attr('rx', 4)
+            .attr('fill', i % 2 ? 'rgba(17,24,34,0.25)' : 'transparent');
+        g.append('text')
+            .attr('x', 12).attr('y', yScale(agent) + yScale.bandwidth() / 2 + 4)
+            .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
+            .text(agent);
+    });
+
+    // Grid lines
+    xScale.ticks(8).forEach(tick => {
+        g.append('line')
+            .attr('x1', xScale(tick)).attr('x2', xScale(tick))
+            .attr('y1', margin.top).attr('y2', margin.top + agents.length * laneH)
+            .attr('stroke', '#0d1520').attr('stroke-width', 1);
+    });
+
+    // Time axis
+    const axisG = g.append('g')
+        .attr('transform', `translate(0,${margin.top + agents.length * laneH + 4})`)
+        .call(d3.axisBottom(xScale).ticks(8).tickSize(0).tickPadding(8));
+    axisG.select('.domain').attr('stroke', '#1a2332');
+    axisG.selectAll('text').attr('fill', '#364152').attr('font-size', '10px');
+
+    // Event positions
+    const evtPos = {};
+    events.forEach(evt => {
+        evtPos[evt.id] = {
+            x: xScale(new Date(evt.ts)),
+            y: yScale(evt.user) + yScale.bandwidth() / 2,
+        };
+    });
+
+    // Build per-agent sorted event list (for finding "next push after pull")
+    const agentEvents = {};
+    events.forEach(evt => {
+        (agentEvents[evt.user] = agentEvents[evt.user] || []).push(evt);
+    });
+
+    // Pull count map
+    const pullCountMap = {};
+    pullLinks.forEach(l => {
+        if (!pullCountMap[l.event_id]) pullCountMap[l.event_id] = new Set();
+        pullCountMap[l.event_id].add(l.puller);
+    });
+
+    // --- Pull edges: source push event → puller's NEXT push event ---
+    // This shows information flow: "I pulled your event, then I pushed mine"
+    const flowEdges = [];
+    const edgeSeen = new Set();
+    pullLinks.forEach(link => {
+        const srcPos = evtPos[link.event_id];
+        if (!srcPos) return;
+        const srcEvt = events.find(e => e.id === link.event_id);
+        if (!srcEvt) return;
+
+        // Find puller's next push event after the PULL timestamp (not source event time).
+        // This ensures we don't connect to events the puller already pushed before pulling.
+        const pullerEvts = agentEvents[link.puller] || [];
+        const pullTime = link.ts ? new Date(link.ts) : new Date(srcEvt.ts);
+        const nextEvt = pullerEvts.find(e => new Date(e.ts) > pullTime);
+
+        const tgtId = nextEvt ? nextEvt.id : null;
+        const key = `${link.event_id}→${tgtId || link.puller}`;
+        if (edgeSeen.has(key)) return;
+        edgeSeen.add(key);
+
+        if (nextEvt && evtPos[nextEvt.id]) {
+            flowEdges.push({
+                sx: srcPos.x, sy: srcPos.y,
+                tx: evtPos[nextEvt.id].x, ty: evtPos[nextEvt.id].y,
+                srcId: link.event_id, tgtId: nextEvt.id, puller: link.puller,
+            });
+        } else {
+            // No next push — draw to puller's lane at right edge
+            const ty = yScale(link.puller) + yScale.bandwidth() / 2;
+            flowEdges.push({
+                sx: srcPos.x, sy: srcPos.y,
+                tx: srcPos.x + 30, ty,
+                srcId: link.event_id, tgtId: null, puller: link.puller,
+            });
+        }
+    });
+
+    // Agent filter: compute connected event set
+    let agentConn = null; // set of event IDs relevant to activeAgent
+    let agentEdgeSet = null; // set of edge keys relevant to activeAgent
+    if (activeAgent) {
+        agentConn = new Set();
+        agentEdgeSet = new Set();
+        // Agent's own push events
+        events.filter(e => e.user === activeAgent).forEach(e => agentConn.add(e.id));
+        // Edges where agent is the pusher (source event belongs to agent) or puller
+        flowEdges.forEach((fe, i) => {
+            const srcEvt = events.find(e => e.id === fe.srcId);
+            const tgtEvt = fe.tgtId ? events.find(e => e.id === fe.tgtId) : null;
+            const srcIsAgent = srcEvt && srcEvt.user === activeAgent;
+            const tgtIsAgent = tgtEvt && tgtEvt.user === activeAgent;
+            const pullerIsAgent = fe.puller === activeAgent;
+            if (srcIsAgent || tgtIsAgent || pullerIsAgent) {
+                agentEdgeSet.add(i);
+                agentConn.add(fe.srcId);
+                if (fe.tgtId) agentConn.add(fe.tgtId);
+            }
+        });
+    }
+    const evtDimmed = id => agentConn && !agentConn.has(id);
+    const edgeDimmed = i => agentEdgeSet && !agentEdgeSet.has(i);
+
+    // Draw edges
+    flowEdges.forEach((d, i) => {
+        const midX = (d.sx + d.tx) / 2;
+        g.append('path')
+            .attr('d', `M${d.sx},${d.sy} C${midX},${d.sy} ${midX},${d.ty} ${d.tx},${d.ty}`)
+            .attr('fill', 'none')
+            .attr('stroke', edgeDimmed(i) ? 'rgba(0,229,160,0.06)' : 'rgba(0,229,160,0.35)')
+            .attr('stroke-width', edgeDimmed(i) ? 0.8 : 1.5)
+            .attr('stroke-dasharray', '5,3')
+            .attr('marker-end', edgeDimmed(i) ? '' : 'url(#a-flow-pull)')
+            .attr('class', 'flow-edge')
+            .attr('data-src', d.srcId)
+            .attr('data-tgt', d.tgtId || '');
+    });
+
+    // --- Event dots ---
+    const evtGroups = g.selectAll('.flow-evt')
+        .data(events).join('g')
+        .attr('class', 'flow-evt')
+        .attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${evtPos[d.id].x},${evtPos[d.id].y})`)
+        .attr('opacity', d => evtDimmed(d.id) ? 0.12 : 1);
+
+    // Outer glow
+    evtGroups.append('circle')
+        .attr('r', dotR + 4)
+        .attr('fill', d => (C[d.type] || C.change) + '08')
+        .attr('stroke', d => (C[d.type] || C.change) + '20')
+        .attr('stroke-width', 0.5);
+    // Main dot
+    evtGroups.append('circle')
+        .attr('r', dotR)
+        .attr('fill', d => C[d.type] || C.change)
+        .attr('opacity', 0.85);
+    // Center highlight
+    evtGroups.append('circle')
+        .attr('r', 2.5)
+        .attr('fill', '#fff')
+        .attr('opacity', 0.6);
+
+    // Pull count badge
+    evtGroups.filter(d => pullCountMap[d.id]?.size).append('text')
+        .attr('x', 0).attr('y', -dotR - 6)
+        .attr('text-anchor', 'middle')
+        .attr('fill', C.accent).attr('font-size', '8px').attr('font-weight', '700')
+        .text(d => pullCountMap[d.id].size + '\u2193');
+
+    // --- Interactions ---
+    evtGroups.on('mouseenter', (ev, d) => {
+        showPopover({
+            type: 'event', label: d.result, event_type: d.type,
+            data: { result: d.result, process: d.process, ts: d.ts,
+                    pulled_by: pullCountMap[d.id] ? Array.from(pullCountMap[d.id]).join(', ') : null },
+        }, ev, null);
+    });
+
+    evtGroups.on('click', (ev, d) => {
+        ev.stopPropagation();
+        // Find all connected events (pulled from this, or this pulled from)
+        const conn = new Set([d.id]);
+        flowEdges.forEach(e => {
+            if (e.srcId === d.id && e.tgtId) conn.add(e.tgtId);
+            if (e.tgtId === d.id) conn.add(e.srcId);
+        });
+        evtGroups.transition().duration(200).attr('opacity', n => conn.has(n.id) ? 1 : 0.1);
+        g.selectAll('.flow-edge').transition().duration(200)
+            .attr('opacity', function() {
+                const el = d3.select(this);
+                return el.attr('data-src') === d.id || el.attr('data-tgt') === d.id ? 1 : 0.04;
+            });
+    });
+
+    // --- Legend ---
+    const lg = svg.append('g').attr('transform', `translate(20, ${totalH - 28})`);
+    const typeItems = [
+        { c: C.decision, l: 'Decision' }, { c: C.correction, l: 'Correction' },
+        { c: C.discovery, l: 'Discovery' }, { c: C.change, l: 'Change' },
+        { c: C.broadcast, l: 'Broadcast' },
+    ];
+    typeItems.forEach((it, i) => {
+        const x = i * 90;
+        lg.append('circle').attr('cx', x + 4).attr('cy', 0).attr('r', 4).attr('fill', it.c);
+        lg.append('text').attr('x', x + 14).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text(it.l);
+    });
+    const elX = typeItems.length * 90 + 16;
+    lg.append('line').attr('x1', elX).attr('y1', 0).attr('x2', elX + 28).attr('y2', 0)
+        .attr('stroke', 'rgba(0,229,160,0.5)').attr('stroke-width', 1.3).attr('stroke-dasharray', '5,3');
+    lg.append('text').attr('x', elX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text('info flow (pull)');
+    lg.append('text').attr('x', elX + 130).attr('y', 3).attr('fill', C.accent).attr('font-size', '10px').text('N\u2193 = pull count');
+}
+
+function renderGraphAgentView(data) {
+    const svg = d3.select('#graph-svg');
+    svg.selectAll('*').remove();
+    dismissPopover();
 
     const container = document.getElementById('graph-container');
     const W = container.clientWidth || 900;
@@ -187,40 +556,39 @@ function renderGraph(data) {
     const allEvents = data.nodes.filter(n => n.type === 'event');
     const scopes = data.nodes.filter(n => n.type === 'scope');
 
+    // Render scope filter panel
+    renderScopeFilterPanel(data, scopes, polyScopes);
+
+    // Compute scope-connected set for filtering
+    const scopeConn = activeScope ? buildScopeConnectedSet(data, activeScope) : null;
+
+    // Reset all node positions (prevent stale coords from previous render)
+    data.nodes.forEach(n => { delete n.x; delete n.y; delete n._blockStart; });
+
     // Build adjacency
-    const userEvts = {}, userGhosts = {}, evtScps = {};
+    const userEvts = {}, userGhosts = {};
     data.edges.forEach(e => {
         if (e.relation === 'pushed')   (userEvts[e.source] = userEvts[e.source] || []).push(e.target);
         if (e.relation === 'consumed') (userGhosts[e.source] = userGhosts[e.source] || []).push(e.target);
-        if (e.relation === 'affects')  (evtScps[e.source] = evtScps[e.source] || []).push(e.target);
     });
 
     // --- Layout ---
-    const colX = [130, W * 0.40, W * 0.78];
+    const colX = [100, W * 0.48];
     const PAD_TOP = 60;
 
-    // Count total event cards per user (pushed + ghosts) to compute spacing
-    const userCardCounts = {};
+    const cardH = 64;
+    let yOffset = PAD_TOP;
     users.forEach(u => {
         const pushed = (userEvts[u.id] || []).length;
         const ghosts = (userGhosts[u.id] || []).length;
-        userCardCounts[u.id] = pushed + ghosts;
-    });
-    const maxCards = Math.max(...Object.values(userCardCounts), 1);
-
-    // Users: space them based on how many cards they have
-    const cardH = 48;
-    let yOffset = PAD_TOP;
-    users.forEach(u => {
-        const totalCards = userCardCounts[u.id] || 1;
+        const totalCards = Math.max(pushed + ghosts, 1);
         const blockH = totalCards * cardH;
+        u.x = colX[0];
         u.y = yOffset + blockH / 2;
         u._blockStart = yOffset;
-        u._blockEnd = yOffset + blockH;
-        yOffset += blockH + 24; // gap between user blocks
+        yOffset += blockH + 24;
     });
 
-    // Events: position pushed events under their user
     users.forEach(u => {
         const eIds = userEvts[u.id] || [];
         const eNodes = eIds.map(id => origEvents.find(e => e.id === id)).filter(Boolean);
@@ -233,29 +601,13 @@ function renderGraph(data) {
             e.y = startY + j * cardH + cardH / 2;
         });
     });
-    // Orphan events
     allEvents.filter(e => e.x == null).forEach((e, i) => { e.x = colX[1]; e.y = PAD_TOP + i * 50; });
 
-    // Scopes: average y from connected events
-    scopes.forEach(s => {
-        const cIds = data.edges.filter(e => e.relation === 'affects' && e.target === s.id).map(e => e.source);
-        const ys = cIds.map(id => { const ev = events.find(e => e.id === id); return ev ? ev.y : H / 2; });
-        s.x = colX[2];
-        s.y = ys.length ? ys.reduce((a, b) => a + b) / ys.length : H / 2;
-    });
-    // De-overlap
-    scopes.sort((a, b) => a.y - b.y);
-    for (let i = 1; i < scopes.length; i++) {
-        if (scopes[i].y - scopes[i - 1].y < 48) scopes[i].y = scopes[i - 1].y + 48;
-    }
-
     const g = svg.append('g');
-
-    // Zoom
     svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', e => g.attr('transform', e.transform)));
     svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
 
-    // Column headers (2-column: Agents | Events)
+    // Column headers
     const headers = [
         { x: colX[0], label: 'AGENTS', color: C.user },
         { x: colX[1], label: 'EVENTS', color: C.accent },
@@ -278,19 +630,18 @@ function renderGraph(data) {
     };
     mkArrow('a-default', '#1a2332');
     mkArrow('a-poly', C.correction);
-    mkArrow('a-push', 'rgba(56,189,248,0.3)');
-    mkArrow('a-pull', 'rgba(0,229,160,0.4)');
+    mkArrow('a-push', 'rgba(56,189,248,0.6)');
+    mkArrow('a-pull', 'rgba(0,229,160,0.7)');
 
-    // --- Edges ---
     const bezier = (sx, sy, tx, ty) => {
         const cx = (sx + tx) / 2;
         return `M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}`;
     };
 
-    // Filter: only show pushed, pulled, consumed edges (not affects — scope shown inline)
     const visibleEdges = data.edges.filter(e => e.relation !== 'affects');
+    const dimmed = id => scopeConn && !scopeConn.has(id);
 
-    const links = g.selectAll('.g-edge')
+    g.selectAll('.g-edge')
         .data(visibleEdges).join('path')
         .attr('class', 'g-edge')
         .attr('fill', 'none')
@@ -300,14 +651,15 @@ function renderGraph(data) {
             return s && t ? bezier(s.x, s.y, t.x, t.y) : '';
         })
         .attr('stroke', d => {
-            if (d.relation === 'pulled') return 'rgba(0,229,160,0.30)';
-            if (d.relation === 'consumed') return 'rgba(0,229,160,0.15)';
-            if (d.relation === 'pushed') return 'rgba(56,189,248,0.25)';
+            if (d.relation === 'pulled') return 'rgba(0,229,160,0.7)';
+            if (d.relation === 'consumed') return 'rgba(0,229,160,0.5)';
+            if (d.relation === 'pushed') return 'rgba(56,189,248,0.5)';
             return '#1a2332';
         })
         .attr('stroke-width', d => {
-            if (d.relation === 'pulled') return 1.5;
-            return 1.2;
+            if (d.relation === 'pulled') return 2;
+            if (d.relation === 'consumed') return 1.8;
+            return 1.5;
         })
         .attr('stroke-dasharray', d => (d.relation === 'pulled' || d.relation === 'consumed') ? '6,4' : '')
         .attr('marker-end', d => {
@@ -315,66 +667,94 @@ function renderGraph(data) {
             if (d.relation === 'pushed') return 'url(#a-push)';
             return 'url(#a-default)';
         })
-        .attr('opacity', 0)
-        .transition().duration(500).delay((d, i) => 100 + i * 30).attr('opacity', 1);
+        .attr('opacity', d => (dimmed(d.source) && dimmed(d.target)) ? 0.08 : 1);
 
     // --- User nodes ---
     const uG = g.selectAll('.g-user')
         .data(users).join('g')
         .attr('class', 'g-user').attr('cursor', 'pointer')
         .attr('transform', d => `translate(${d.x},${d.y})`)
-        .attr('opacity', 0);
-    uG.transition().duration(400).delay((d, i) => i * 60).attr('opacity', 1);
+        .attr('opacity', d => dimmed(d.id) ? 0.12 : 1);
 
     uG.append('circle').attr('r', 22)
         .attr('fill', 'rgba(56,189,248,0.08)')
-        .attr('stroke', 'rgba(56,189,248,0.3)').attr('stroke-width', 1.5);
+        .attr('stroke', 'rgba(56,189,248,0.4)').attr('stroke-width', 1.5);
     uG.append('circle').attr('r', 4).attr('fill', C.user);
     uG.append('text').attr('dy', 38).attr('text-anchor', 'middle')
         .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
         .text(d => (d.label || d.id).replace('user:', ''));
 
     // --- Event nodes ---
-    const eW = 200, eH = 40;
+    const eW = 260, eH = 56;
     const eG = g.selectAll('.g-event')
         .data(allEvents).join('g')
         .attr('class', 'g-event').attr('cursor', 'pointer')
         .attr('transform', d => `translate(${d.x},${d.y})`)
-        .attr('opacity', 0);
-    eG.transition().duration(400).delay((d, i) => 200 + i * 40).attr('opacity', 1);
+        .attr('opacity', d => dimmed(d.id) ? 0.12 : 1);
 
     const isGhost = d => d.data && d.data.ghost;
+
+    // Card background
     eG.append('rect')
         .attr('width', eW).attr('height', eH).attr('x', -eW / 2).attr('y', -eH / 2)
         .attr('rx', 8)
-        .attr('fill', d => isGhost(d) ? 'rgba(0,229,160,0.04)' : (C[d.event_type] || C.change) + '12')
-        .attr('stroke', d => isGhost(d) ? 'rgba(0,229,160,0.20)' : (C[d.event_type] || C.change) + '40')
-        .attr('stroke-width', d => isGhost(d) ? 1 : 1)
+        .attr('fill', d => isGhost(d) ? 'rgba(0,229,160,0.04)' : (C[d.event_type] || C.change) + '10')
+        .attr('stroke', d => isGhost(d) ? 'rgba(0,229,160,0.25)' : (C[d.event_type] || C.change) + '40')
+        .attr('stroke-width', d => isGhost(d) ? 1.5 : 1)
         .attr('stroke-dasharray', d => isGhost(d) ? '4,3' : '');
+
+    // Ghost indicator — left accent bar
+    eG.filter(d => isGhost(d)).append('rect')
+        .attr('x', -eW / 2).attr('y', -eH / 2)
+        .attr('width', 3).attr('height', eH)
+        .attr('rx', 1)
+        .attr('fill', C.accent);
 
     // Type badge
     eG.append('rect')
-        .attr('x', -eW / 2 + 6).attr('y', -eH / 2 + 5)
-        .attr('width', d => (d.event_type || 'evt').length * 6 + 10).attr('height', 14)
+        .attr('x', -eW / 2 + 8).attr('y', -eH / 2 + 6)
+        .attr('width', d => (d.event_type || 'evt').length * 6 + 12).attr('height', 15)
         .attr('rx', 4)
         .attr('fill', d => C[d.event_type] || C.change);
     eG.append('text')
-        .attr('x', -eW / 2 + 11).attr('y', -eH / 2 + 14)
+        .attr('x', -eW / 2 + 14).attr('y', -eH / 2 + 16)
         .attr('fill', '#06080c').attr('font-size', '8px').attr('font-weight', '700')
         .attr('letter-spacing', '0.5px')
         .text(d => (d.event_type || 'event').toUpperCase());
 
-    // Result text
+    // Ghost badge — "PULLED" label next to type badge
+    eG.filter(d => isGhost(d)).append('rect')
+        .attr('x', d => -eW / 2 + 8 + (d.event_type || 'evt').length * 6 + 16)
+        .attr('y', -eH / 2 + 6)
+        .attr('width', 42).attr('height', 15)
+        .attr('rx', 4)
+        .attr('fill', 'rgba(0,229,160,0.2)');
+    eG.filter(d => isGhost(d)).append('text')
+        .attr('x', d => -eW / 2 + 14 + (d.event_type || 'evt').length * 6 + 16)
+        .attr('y', -eH / 2 + 16)
+        .attr('fill', C.accent).attr('font-size', '8px').attr('font-weight', '600')
+        .attr('letter-spacing', '0.5px')
+        .text('PULLED');
+
+    // Ghost "from: user" label (top-right)
+    eG.filter(d => isGhost(d)).append('text')
+        .attr('x', eW / 2 - 8).attr('y', -eH / 2 + 16)
+        .attr('text-anchor', 'end')
+        .attr('fill', 'rgba(0,229,160,0.6)')
+        .attr('font-size', '9px')
+        .text(d => `\u2190 ${d.data.original_user}`);
+
+    // Result text (middle row)
     eG.append('text')
-        .attr('x', -eW / 2 + 8).attr('y', eH / 2 - 10)
-        .attr('fill', d => isGhost(d) ? '#5a6a7e' : '#c8d6e5')
-        .attr('font-size', '10px')
+        .attr('x', -eW / 2 + 10).attr('y', 4)
+        .attr('fill', d => isGhost(d) ? '#6a7a8e' : '#dce6f0')
+        .attr('font-size', '11px')
         .text(d => {
             const t = d.label || d.id;
-            return t.length > 28 ? t.substring(0, 28) + '...' : t;
+            return t.length > 32 ? t.substring(0, 32) + '...' : t;
         });
 
-    // Scope tags inline — build event→scopes lookup from edges
+    // Scope tags (bottom row, separate from result text)
     const evtScopeLabels = {};
     data.edges.forEach(e => {
         if (e.relation === 'affects') {
@@ -386,7 +766,6 @@ function renderGraph(data) {
         }
     });
 
-    // Render scope tags at bottom-right of each event card
     eG.each(function(d) {
         const scopeList = evtScopeLabels[d.id] || [];
         if (!scopeList.length) return;
@@ -394,26 +773,15 @@ function renderGraph(data) {
         const isPoly = scopeList.some(s => polyScopes.has(`scope:${s}`) || polyScopes.has(s));
         const tag = scopeList.slice(0, 2).join(', ');
         el.append('text')
-            .attr('x', eW / 2 - 8).attr('y', eH / 2 - 8)
-            .attr('text-anchor', 'end')
-            .attr('fill', isPoly ? C.correction : '#364152')
-            .attr('font-size', '8px')
+            .attr('x', -eW / 2 + 10).attr('y', eH / 2 - 6)
+            .attr('fill', isPoly ? C.correction : '#4a5568')
+            .attr('font-size', '9px')
             .attr('font-weight', isPoly ? '600' : '400')
-            .text((isPoly ? '\u26A0 ' : '') + tag);
+            .text((isPoly ? '\u26A0 ' : '\u2192 ') + tag);
     });
 
-    // Ghost label — show "consumed from: {user}"
-    eG.filter(d => isGhost(d)).append('text')
-        .attr('x', eW / 2 - 8).attr('y', -eH / 2 + 12)
-        .attr('text-anchor', 'end')
-        .attr('fill', 'rgba(0,229,160,0.5)')
-        .attr('font-size', '8px')
-        .text(d => `from ${d.data.original_user}`);
-
-    // (Scope nodes no longer rendered — shown inline in event cards + filter panel above)
-
     // --- Click: highlight subgraph + popover ---
-    const allNodes = g.selectAll('.g-user, .g-event, .g-scope');
+    const allNodes = g.selectAll('.g-user, .g-event');
     allNodes.on('click', (ev, d) => {
         ev.stopPropagation();
         const conn = new Set([d.id]);
@@ -423,11 +791,223 @@ function renderGraph(data) {
         allNodes.transition().duration(200).attr('opacity', n => conn.has(n.id) ? 1 : 0.1);
         g.selectAll('.g-edge').transition().duration(200)
             .attr('opacity', e => (e.source === d.id || e.target === d.id) ? 1 : 0.04);
-
         showPopover(d, ev, data);
     });
 
     // --- Legend ---
+    renderGraphLegend(svg, H);
+}
+
+// ============================================================
+// GRAPH — Scope View
+// ============================================================
+function renderGraphScopeView(data) {
+    const svg = d3.select('#graph-svg');
+    svg.selectAll('*').remove();
+    dismissPopover();
+
+    const container = document.getElementById('graph-container');
+    const W = container.clientWidth || 900;
+    const H = container.clientHeight || 600;
+    svg.attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+
+    const polyScopes = new Set(data.polymorphisms.map(p => p.scope));
+    const users = data.nodes.filter(n => n.type === 'user');
+    const scopes = data.nodes.filter(n => n.type === 'scope');
+    const allEvents = data.nodes.filter(n => n.type === 'event');
+
+    // Render scope filter panel
+    renderScopeFilterPanel(data, scopes, polyScopes);
+
+    // Reset all node positions
+    data.nodes.forEach(n => { delete n.x; delete n.y; delete n._blockStart; });
+
+    if (!scopes.length) {
+        svg.append('text').attr('x', W / 2).attr('y', H / 2)
+            .attr('text-anchor', 'middle').attr('fill', '#364152')
+            .attr('font-size', '14px')
+            .text('No scopes yet. Events need file paths or scope fields.');
+        return;
+    }
+
+    // Build scope→users and scope→events maps
+    const scopeToEvents = {};
+    const scopeToUsers = {};
+    data.edges.forEach(e => {
+        if (e.relation === 'affects') {
+            (scopeToEvents[e.target] = scopeToEvents[e.target] || new Set()).add(e.source);
+        }
+    });
+    // event→user map
+    const eventToUser = {};
+    data.edges.forEach(e => {
+        if (e.relation === 'pushed') eventToUser[e.target] = e.source;
+    });
+    // ghost→consumer map
+    const ghostToConsumer = {};
+    data.edges.forEach(e => {
+        if (e.relation === 'consumed') ghostToConsumer[e.target] = e.source;
+    });
+
+    // For each scope, find which users pushed events affecting it, and which consumed
+    scopes.forEach(s => {
+        const evtIds = scopeToEvents[s.id] || new Set();
+        const pushers = new Set();
+        const consumers = new Set();
+        evtIds.forEach(eid => {
+            const pusher = eventToUser[eid];
+            if (pusher) pushers.add(pusher);
+            const consumer = ghostToConsumer[eid];
+            if (consumer) consumers.add(consumer);
+        });
+        // Also check ghost events that are pulled copies of events in this scope
+        data.edges.forEach(e => {
+            if (e.relation === 'pulled' && evtIds.has(e.source)) {
+                const consumer = ghostToConsumer[e.target];
+                if (consumer) consumers.add(consumer);
+            }
+        });
+        scopeToUsers[s.id] = { pushers, consumers };
+    });
+
+    // Layout: scopes in center column, users on both sides
+    const PAD_TOP = 60;
+    const centerX = W / 2;
+    const scopeSpacing = Math.min(80, (H - PAD_TOP * 2) / Math.max(scopes.length, 1));
+
+    // Filter scopes if active
+    const visibleScopes = activeScope ? scopes.filter(s => s.id === activeScope) : scopes;
+
+    visibleScopes.forEach((s, i) => {
+        s.x = centerX;
+        s.y = PAD_TOP + i * scopeSpacing + scopeSpacing / 2;
+    });
+
+    // Position users around scopes
+    const userPositions = {};
+    users.forEach((u, i) => {
+        // Determine which side based on index (alternate)
+        const side = i % 2 === 0 ? -1 : 1;
+        const xOffset = side * (W * 0.32);
+        u.x = centerX + xOffset;
+        u.y = PAD_TOP + i * 70 + 35;
+        userPositions[u.id] = { x: u.x, y: u.y };
+    });
+
+    const g = svg.append('g');
+    svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', e => g.attr('transform', e.transform)));
+    svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
+
+    // Arrows
+    const defs = svg.append('defs');
+    const mkArrow = (id, color) => {
+        defs.append('marker').attr('id', id).attr('viewBox', '0 0 8 6')
+            .attr('refX', 8).attr('refY', 3).attr('markerWidth', 6).attr('markerHeight', 5)
+            .attr('orient', 'auto')
+            .append('path').attr('d', 'M0,0.5 L7,3 L0,5.5').attr('fill', color);
+    };
+    mkArrow('a-push-sv', 'rgba(56,189,248,0.4)');
+    mkArrow('a-pull-sv', 'rgba(0,229,160,0.5)');
+
+    // Column headers
+    g.append('text').attr('x', centerX).attr('y', 28)
+        .attr('text-anchor', 'middle').attr('fill', C.scope)
+        .attr('font-size', '10px').attr('font-weight', '600')
+        .attr('letter-spacing', '2px').attr('opacity', 0.5)
+        .text('SCOPES');
+
+    const bezier = (sx, sy, tx, ty) => {
+        const cx = (sx + tx) / 2;
+        return `M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}`;
+    };
+
+    // Draw edges: user → scope (push) and scope → user (pull/consumed)
+    const edgeData = [];
+    visibleScopes.forEach(s => {
+        const info = scopeToUsers[s.id] || { pushers: new Set(), consumers: new Set() };
+        info.pushers.forEach(uid => {
+            const u = users.find(u => u.id === uid);
+            if (u) {
+                // Count events pushed to this scope by this user
+                const evtIds = scopeToEvents[s.id] || new Set();
+                let count = 0;
+                evtIds.forEach(eid => { if (eventToUser[eid] === uid) count++; });
+                edgeData.push({ sx: u.x, sy: u.y, tx: s.x, ty: s.y, type: 'push', count });
+            }
+        });
+        info.consumers.forEach(uid => {
+            const u = users.find(u => u.id === uid);
+            if (u) edgeData.push({ sx: s.x, sy: s.y, tx: u.x, ty: u.y, type: 'pull', count: 0 });
+        });
+    });
+
+    g.selectAll('.g-sv-edge')
+        .data(edgeData).join('path')
+        .attr('class', 'g-sv-edge g-edge')
+        .attr('fill', 'none')
+        .attr('d', d => bezier(d.sx, d.sy, d.tx, d.ty))
+        .attr('stroke', d => d.type === 'push' ? 'rgba(56,189,248,0.3)' : 'rgba(0,229,160,0.3)')
+        .attr('stroke-width', d => Math.max(1.5, Math.min(d.count, 4)))
+        .attr('stroke-dasharray', d => d.type === 'pull' ? '6,4' : '')
+        .attr('marker-end', d => d.type === 'push' ? 'url(#a-push-sv)' : 'url(#a-pull-sv)');
+
+    // --- User nodes ---
+    const uG = g.selectAll('.g-user')
+        .data(users).join('g')
+        .attr('class', 'g-user').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+
+    uG.append('circle').attr('r', 22)
+        .attr('fill', 'rgba(56,189,248,0.08)')
+        .attr('stroke', 'rgba(56,189,248,0.3)').attr('stroke-width', 1.5);
+    uG.append('circle').attr('r', 4).attr('fill', C.user);
+    uG.append('text').attr('dy', 38).attr('text-anchor', 'middle')
+        .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
+        .text(d => (d.label || d.id).replace('user:', ''));
+
+    // --- Scope nodes ---
+    const sR = 28;
+    const sG = g.selectAll('.g-scope')
+        .data(visibleScopes).join('g')
+        .attr('class', 'g-scope').attr('cursor', 'pointer')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+
+    sG.append('circle').attr('r', sR)
+        .attr('fill', d => polyScopes.has(d.id) || polyScopes.has((d.label || '').replace('scope:', ''))
+            ? 'rgba(255,71,87,0.08)' : 'rgba(90,106,126,0.08)')
+        .attr('stroke', d => polyScopes.has(d.id) || polyScopes.has((d.label || '').replace('scope:', ''))
+            ? 'rgba(255,71,87,0.4)' : 'rgba(90,106,126,0.3)')
+        .attr('stroke-width', 1.5);
+
+    sG.append('text').attr('text-anchor', 'middle').attr('dy', 4)
+        .attr('fill', d => polyScopes.has(d.id) || polyScopes.has((d.label || '').replace('scope:', ''))
+            ? C.correction : '#8b949e')
+        .attr('font-size', '9px').attr('font-weight', '500')
+        .text(d => {
+            const l = (d.label || d.id).replace('scope:', '');
+            return l.length > 16 ? l.substring(0, 16) + '..' : l;
+        });
+
+    // Event count badge
+    sG.append('text').attr('text-anchor', 'middle').attr('dy', -sR - 8)
+        .attr('fill', '#5a6a7e').attr('font-size', '9px')
+        .text(d => {
+            const count = (scopeToEvents[d.id] || new Set()).size;
+            return count + ' event' + (count !== 1 ? 's' : '');
+        });
+
+    // Click on scope node
+    const allNodes = g.selectAll('.g-user, .g-scope');
+    allNodes.on('click', (ev, d) => {
+        ev.stopPropagation();
+        showPopover(d, ev, data);
+    });
+
+    // Legend
+    renderGraphLegend(svg, H);
+}
+
+function renderGraphLegend(svg, H) {
     const lg = svg.append('g').attr('transform', `translate(20, ${H - 36})`);
     const items = [
         { c: C.user, l: 'Agent' }, { c: C.correction, l: 'Correction' },
@@ -440,7 +1020,6 @@ function renderGraph(data) {
         lg.append('text').attr('x', x + 14).attr('y', 4)
             .attr('fill', '#364152').attr('font-size', '10px').text(it.l);
     });
-    // Edge legend
     const elX = items.length * 96 + 20;
     lg.append('line').attr('x1', elX).attr('y1', 0).attr('x2', elX + 20).attr('y2', 0)
         .attr('stroke', 'rgba(56,189,248,0.4)').attr('stroke-width', 1.5);
@@ -585,6 +1164,7 @@ function showPopover(d, event, graphData) {
             html += `<div class="popover-row"><b>Process:</b></div>`;
             d.data.process.forEach(p => { html += `<div class="popover-step">&rarr; ${esc(p)}</div>`; });
         }
+        if (d.data.pulled_by) html += `<div class="popover-row"><b>Pulled by:</b> ${esc(d.data.pulled_by)}</div>`;
         if (d.data.ts) html += `<div class="popover-row muted">${new Date(d.data.ts).toLocaleString()}</div>`;
     } else if (d.type === 'scope' && graphData) {
         const scopeLabel = (d.label || d.id || '').replace('scope:', '');
