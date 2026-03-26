@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "name": "overmind-marketplace",
+  "description": "Overmind: distributed memory sync for Claude Code agents",
+  "plugins": [
+    {
+      "name": "overmind-plugin",
+      "description": "Real-time memory sync between Claude Code instances — push/pull events, broadcast, scope-filtered context injection",
+      "version": "0.1.0",
+      "source": {
+        "type": "relative",
+        "path": "plugin"
+      }
+    }
+  ]
+}
