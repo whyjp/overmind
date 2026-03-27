@@ -796,23 +796,23 @@ function renderFlowView(data) {
         const agentEvts = agentEvents[agent] || [];
         const laneY = yScale(agent) + yScale.bandwidth() / 2;
 
-        // Last PUSH: label on LEFT side of the node
+        // Last PUSH: label at TOP-LEFT of the node
         if (agentEvts.length > 0) {
             const lastPush = agentEvts[agentEvts.length - 1];
             const pos = evtPos[lastPush.id];
             if (pos) {
-                const pushLabel = `PUSH \u25C0 ${agent}`;
+                const pushLabel = `PUSH \u25B2 ${agent}`;
                 const pushLabelW = pushLabel.length * 5.5 + 12;
                 const labelG = g.append('g')
-                    .attr('transform', `translate(${pos.x - dotR - 6},${pos.y})`);
+                    .attr('transform', `translate(${pos.x - pushLabelW / 2},${pos.y - dotR - 18})`);
                 labelG.append('rect')
-                    .attr('x', -pushLabelW).attr('y', -9).attr('width', pushLabelW).attr('height', 18)
+                    .attr('x', 0).attr('y', -9).attr('width', pushLabelW).attr('height', 18)
                     .attr('rx', 3)
                     .attr('fill', (C[lastPush.type] || C.change) + '15')
                     .attr('stroke', (C[lastPush.type] || C.change) + '35')
                     .attr('stroke-width', 0.5);
                 labelG.append('text')
-                    .attr('x', -pushLabelW + 5).attr('y', 3)
+                    .attr('x', 5).attr('y', 3)
                     .attr('fill', C[lastPush.type] || C.change)
                     .attr('font-size', '8px').attr('font-weight', '600')
                     .attr('letter-spacing', '0.3px')
@@ -820,17 +820,17 @@ function renderFlowView(data) {
             }
         }
 
-        // Last PULL: label on RIGHT side of the ghost node
+        // Last PULL: label at BOTTOM-RIGHT of the ghost node
         const lastPull = lastPullPerAgent[agent];
         if (lastPull && evtPos[lastPull.event_id]) {
             const srcPos = evtPos[lastPull.event_id];
             const gx = srcPos.x;  // ghost X = original event X
             const gy = laneY;     // ghost Y = puller's lane
 
-            const pullLabel = `${lastPull.event_user} \u25B6 PULL`;
+            const pullLabel = `${lastPull.event_user} \u25BC PULL`;
             const pullLabelW = pullLabel.length * 5.5 + 12;
             const labelG = g.append('g')
-                .attr('transform', `translate(${gx + dotR + 6},${gy})`);
+                .attr('transform', `translate(${gx - pullLabelW / 2 + dotR},${gy + dotR + 6})`);
             labelG.append('rect')
                 .attr('x', 0).attr('y', -9).attr('width', pullLabelW).attr('height', 18)
                 .attr('rx', 3)
