@@ -93,4 +93,22 @@ def create_mcp_server(store: SQLiteStore) -> FastMCP:
         await store.push([evt])
         return {"id": evt_id, "delivered": True}
 
+    @mcp.tool()
+    async def overmind_feedback(
+        repo_id: str,
+        event_id: str,
+        user: str,
+        feedback_type: str,
+    ) -> dict:
+        """Rate a pulled lesson's usefulness.
+
+        Args:
+            repo_id: Repository identifier
+            event_id: ID of the event to give feedback on
+            user: User giving the feedback
+            feedback_type: One of "prevented_error", "helpful", "irrelevant"
+        """
+        was_new, count = await store.record_feedback(repo_id, event_id, user, feedback_type)
+        return {"recorded": was_new, "prevented_count": count}
+
     return mcp

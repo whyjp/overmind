@@ -57,6 +57,26 @@ class TestMCPTools:
             })
             assert "API" in str(pull_result)
 
+    async def test_overmind_feedback(self, mcp):
+        async with Client(mcp) as dev_a, Client(mcp) as dev_b:
+            await dev_a.call_tool("overmind_push", {
+                "repo_id": "github.com/test/repo",
+                "user": "dev_a",
+                "events": [{
+                    "id": "evt_fb_mcp_001",
+                    "type": "correction",
+                    "ts": "2026-03-26T05:30:00Z",
+                    "result": "fixed auth bug",
+                }],
+            })
+            result = await dev_b.call_tool("overmind_feedback", {
+                "repo_id": "github.com/test/repo",
+                "event_id": "evt_fb_mcp_001",
+                "user": "dev_b",
+                "feedback_type": "helpful",
+            })
+            assert "recorded" in str(result)
+
     async def test_concurrent_push(self, mcp):
         import asyncio
 
