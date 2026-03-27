@@ -20,6 +20,7 @@ from overmind.models import (
     PullResponse,
     ReportResponse,
 )
+from overmind.summary import MockSummaryGenerator, SummaryGenerator
 
 DetailLevel = Literal["summary", "full"]
 
@@ -73,6 +74,9 @@ class StoreProtocol(Protocol):
     ) -> ReportResponse: ...
     async def get_graph_data(self, repo_id: str) -> GraphResponse: ...
     async def get_flow_data(self, repo_id: str) -> dict: ...
+    async def record_feedback(
+        self, repo_id: str, event_id: str, user: str, feedback_type: str
+    ) -> tuple[bool, int]: ...
     async def cleanup_expired(self, repo_id: str, ttl_days: int = 30) -> int: ...
 
 
@@ -84,13 +88,14 @@ class StoreProtocol(Protocol):
 class SQLiteStore:
     """Async SQLite-backed store for MemoryEvent objects."""
 
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, summary_generator: SummaryGenerator | None = None) -> None:
         self.data_dir = Path(data_dir)
         self.db_path = self.data_dir / "overmind.db"
         self._db: aiosqlite.Connection | None = None
         # In-memory version counters for SSE change detection
         self._version: dict[str, int] = defaultdict(int)
         self._global_version: int = 0
+        self._summary_generator = summary_generator or MockSummaryGenerator()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -102,6 +107,17 @@ class SQLiteStore:
         self._db = await aiosqlite.connect(str(self.db_path))
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
+        await self._migrate_columns()
+
+    async def _migrate_columns(self) -> None:
+        """Add columns that may be missing in older DBs."""
+        async with self.db.execute("PRAGMA table_info(events)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "summary" not in cols:
+            await self.db.execute("ALTER TABLE events ADD COLUMN summary TEXT")
+        if "prevented_count" not in cols:
+            await self.db.execute("ALTER TABLE events ADD COLUMN prevented_count INTEGER DEFAULT 0")
+        await self.db.commit()
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -125,9 +141,13 @@ class SQLiteStore:
         accepted_repos: set[str] = set()
 
         for evt in events:
+            # Generate summary if not already present
+            if evt.summary is None:
+                evt.summary = await self._summary_generator.generate(evt)
+
             async with self.db.execute(
-                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope, summary, prevented_count)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     evt.id,
                     evt.repo_id,
@@ -140,6 +160,8 @@ class SQLiteStore:
                     json.dumps(evt.process),
                     evt.priority,
                     evt.scope,
+                    evt.summary,
+                    evt.prevented_count,
                 ),
             ) as cur:
                 if cur.rowcount > 0:
@@ -203,6 +225,8 @@ class SQLiteStore:
             process=process,
             priority=row["priority"],
             scope=row["scope"],
+            summary=row["summary"],
+            prevented_count=row["prevented_count"] or 0,
         )
 
     async def pull(
@@ -339,6 +363,18 @@ class SQLiteStore:
         ) as cur:
             total_pulls = (await cur.fetchone())["cnt"]
 
+        # Feedback counts
+        async with self.db.execute(
+            "SELECT COUNT(*) as cnt FROM feedback WHERE repo_id = ?", (repo_id,)
+        ) as cur:
+            total_feedback = (await cur.fetchone())["cnt"]
+
+        async with self.db.execute(
+            "SELECT COUNT(*) as cnt FROM feedback WHERE repo_id = ? AND type = 'prevented_error'",
+            (repo_id,),
+        ) as cur:
+            prevented_errors = (await cur.fetchone())["cnt"]
+
         return ReportResponse(
             repo_id=repo_id,
             period=period,
@@ -346,6 +382,8 @@ class SQLiteStore:
             total_pulls=total_pulls,
             unique_users=unique_users,
             events_by_type=events_by_type,
+            total_feedback=total_feedback,
+            prevented_errors=prevented_errors,
         )
 
     # ------------------------------------------------------------------
@@ -555,6 +593,38 @@ class SQLiteStore:
         }
 
     # ------------------------------------------------------------------
+    # Feedback
+    # ------------------------------------------------------------------
+
+    async def record_feedback(
+        self, repo_id: str, event_id: str, user: str, feedback_type: str
+    ) -> tuple[bool, int]:
+        """Record feedback for an event. Returns (was_new, current_prevented_count)."""
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        async with self.db.execute(
+            "INSERT OR IGNORE INTO feedback (repo_id, event_id, user, type, ts) VALUES (?, ?, ?, ?, ?)",
+            (repo_id, event_id, user, feedback_type, now_iso),
+        ) as cur:
+            was_new = cur.rowcount > 0
+
+        if was_new and feedback_type == "prevented_error":
+            await self.db.execute(
+                "UPDATE events SET prevented_count = prevented_count + 1 WHERE id = ?",
+                (event_id,),
+            )
+
+        await self.db.commit()
+
+        # Fetch current prevented_count
+        async with self.db.execute(
+            "SELECT prevented_count FROM events WHERE id = ?", (event_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            prevented_count = (row["prevented_count"] or 0) if row else 0
+
+        return was_new, prevented_count
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 
@@ -596,7 +666,9 @@ CREATE TABLE IF NOT EXISTS events (
     files TEXT DEFAULT '[]',
     process TEXT DEFAULT '[]',
     priority TEXT DEFAULT 'normal',
-    scope TEXT
+    scope TEXT,
+    summary TEXT,
+    prevented_count INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo_id);
@@ -615,6 +687,17 @@ CREATE TABLE IF NOT EXISTS pull_log (
 
 CREATE INDEX IF NOT EXISTS idx_pull_repo ON pull_log(repo_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pull_dedup ON pull_log(repo_id, puller, event_id);
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    user TEXT NOT NULL,
+    type TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    UNIQUE(event_id, user, type)
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_event ON feedback(event_id);
 """
 
 
