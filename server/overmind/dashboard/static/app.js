@@ -756,6 +756,91 @@ function renderFlowView(data) {
             });
     });
 
+    // --- Agent HEAD labels: last push & last pull per agent ---
+    // Collect last pull (ghost) per agent: latest pull_link timestamp per puller
+    const lastPullPerAgent = {};
+    pullLinks.forEach(link => {
+        const prev = lastPullPerAgent[link.puller];
+        if (!prev || link.ts > prev.ts) {
+            lastPullPerAgent[link.puller] = link;
+        }
+    });
+
+    agents.forEach(agent => {
+        const agentEvts = agentEvents[agent] || [];
+        const laneY = yScale(agent) + yScale.bandwidth() / 2;
+
+        // Last PUSH: rightmost event on this agent's lane
+        if (agentEvts.length > 0) {
+            const lastPush = agentEvts[agentEvts.length - 1];
+            const pos = evtPos[lastPush.id];
+            if (pos) {
+                const labelG = g.append('g')
+                    .attr('transform', `translate(${pos.x + dotR + 6},${pos.y})`);
+                labelG.append('rect')
+                    .attr('x', 0).attr('y', -8).attr('width', 62).attr('height', 16)
+                    .attr('rx', 3)
+                    .attr('fill', (C[lastPush.type] || C.change) + '20')
+                    .attr('stroke', (C[lastPush.type] || C.change) + '40')
+                    .attr('stroke-width', 0.5);
+                labelG.append('text')
+                    .attr('x', 5).attr('y', 3)
+                    .attr('fill', C[lastPush.type] || C.change)
+                    .attr('font-size', '8px').attr('font-weight', '600')
+                    .attr('letter-spacing', '0.5px')
+                    .text('LAST PUSH');
+            }
+        }
+
+        // Last PULL: find the ghost position for this agent's latest pull
+        const lastPull = lastPullPerAgent[agent];
+        if (lastPull && evtPos[lastPull.event_id]) {
+            const srcPos = evtPos[lastPull.event_id];
+            const gx = srcPos.x;  // ghost X = original event X
+            const gy = laneY;     // ghost Y = puller's lane
+
+            const labelG = g.append('g')
+                .attr('transform', `translate(${gx + dotR + 6},${gy})`);
+            labelG.append('rect')
+                .attr('x', 0).attr('y', -8).attr('width', 56).attr('height', 16)
+                .attr('rx', 3)
+                .attr('fill', 'rgba(0,229,160,0.08)')
+                .attr('stroke', 'rgba(0,229,160,0.25)')
+                .attr('stroke-width', 0.5);
+            labelG.append('text')
+                .attr('x', 5).attr('y', 3)
+                .attr('fill', C.accent)
+                .attr('font-size', '8px').attr('font-weight', '600')
+                .attr('letter-spacing', '0.5px')
+                .text('LAST PULL');
+        }
+
+        // Agent status summary at the right edge of the lane
+        const rightEdge = effectiveW - margin.right + 4;
+        const statusLines = [];
+        if (agentEvts.length > 0) {
+            const last = agentEvts[agentEvts.length - 1];
+            const scope = last.scope || (last.files.length ? last.files[0].replace(/\\/, '/').replace(/\/[^/]+$/, '/*') : '');
+            statusLines.push({ text: `\u25B6 ${agentEvts.length} pushed`, color: C[last.type] || C.change });
+            if (scope) statusLines.push({ text: scope, color: '#4a5568' });
+        }
+        const pullCount = pullLinks.filter(l => l.puller === agent).length;
+        if (pullCount > 0) {
+            statusLines.push({ text: `\u25BC ${pullCount} pulled`, color: C.accent });
+        }
+
+        statusLines.forEach((line, i) => {
+            g.append('text')
+                .attr('x', rightEdge)
+                .attr('y', laneY - 8 + i * 12)
+                .attr('text-anchor', 'start')
+                .attr('fill', line.color)
+                .attr('font-size', '9px')
+                .attr('font-weight', '500')
+                .text(line.text);
+        });
+    });
+
     // --- Legend ---
     const lg = svg.append('g').attr('transform', `translate(20, ${totalH - 28})`);
     const typeItems = [
