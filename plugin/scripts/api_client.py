@@ -48,6 +48,14 @@ def normalize_git_remote(url: str) -> str:
     return url
 
 
+def file_to_scope(file_path: str) -> str:
+    """Convert file path to scope glob pattern. e.g. 'src/auth/login.ts' -> 'src/auth/*'."""
+    parts = file_path.replace("\\", "/").rsplit("/", 1)
+    if len(parts) == 2:
+        return parts[0] + "/*"
+    return file_path
+
+
 def get_user() -> str:
     """Get current user identifier."""
     return os.environ.get("OVERMIND_USER", os.environ.get("USER", os.environ.get("USERNAME", "unknown")))
