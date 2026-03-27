@@ -61,6 +61,14 @@
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 0a8 8 0 110 16A8 8 0 018 0zm.5 4.75a.75.75 0 00-1.5 0v3.5a.75.75 0 00.37.65l2.5 1.5a.75.75 0 10.76-1.3L8.5 7.87V4.75z"/></svg>
                 Timeline
             </button>
+            <div class="header-sep"></div>
+            <button class="refresh-btn" id="refresh-btn" onclick="refreshActiveTab()" title="Refresh current tab">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2.5a5.487 5.487 0 00-4.131 1.869l1.204 1.204A.25.25 0 014.896 6H1.25A.25.25 0 011 5.75V2.104a.25.25 0 01.427-.177l1.38 1.38A7.001 7.001 0 0115 8a.75.75 0 01-1.5 0A5.5 5.5 0 008 2.5zM1.75 8a.75.75 0 01.75.75 5.5 5.5 0 009.546 3.746l-1.178-1.178A.25.25 0 0111.044 11h3.647a.25.25 0 01.25.25v3.646a.25.25 0 01-.427.177l-1.38-1.38A7.001 7.001 0 011 8.75.75.75 0 011.75 8z"/></svg>
+            </button>
+            <button class="auto-refresh-btn" id="auto-refresh-btn" onclick="toggleAutoRefresh()" title="Toggle auto-refresh (5s)">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 0a8 8 0 110 16A8 8 0 018 0zm.5 4.75a.75.75 0 00-1.5 0v3.5a.75.75 0 00.37.65l2.5 1.5a.75.75 0 10.76-1.3L8.5 7.87V4.75z"/></svg>
+                <span id="auto-refresh-label">AUTO</span>
+            </button>
         </nav>
     </header>
 

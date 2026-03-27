@@ -11,6 +11,59 @@ let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
 let activeScope = null; // currently selected scope filter
 let activeAgent = null; // currently selected agent filter (flow view)
 
+// --- Auto-refresh ---
+let autoRefreshInterval = null;
+const AUTO_REFRESH_MS = 5000;
+
+function getActiveTab() {
+    const active = document.querySelector('.tab.active');
+    return active ? active.dataset.tab : 'overview';
+}
+
+function refreshActiveTab() {
+    if (!currentRepo) return;
+    const tab = getActiveTab();
+    if (tab === 'overview') loadOverview();
+    else if (tab === 'graph') { loadGraphData(); loadFlowData(); }
+    else if (tab === 'timeline') loadTimelineData();
+    // Also refresh repo list to pick up new repos
+    refreshRepoList();
+}
+
+async function refreshRepoList() {
+    try {
+        const res = await fetch(`${API}/api/repos`);
+        const repos = await res.json();
+        const sel = document.getElementById('repo-id');
+        const current = sel.value;
+        const existing = new Set([...sel.options].map(o => o.value));
+        repos.forEach(r => {
+            if (!existing.has(r)) {
+                const o = document.createElement('option');
+                o.value = r; o.textContent = r;
+                sel.appendChild(o);
+            }
+        });
+        if (!current && repos.length === 1) { sel.value = repos[0]; loadAll(); }
+    } catch (e) { /* server may be restarting */ }
+}
+
+function toggleAutoRefresh() {
+    const btn = document.getElementById('auto-refresh-btn');
+    const label = document.getElementById('auto-refresh-label');
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+        btn.classList.remove('active');
+        label.textContent = 'AUTO';
+    } else {
+        autoRefreshInterval = setInterval(refreshActiveTab, AUTO_REFRESH_MS);
+        btn.classList.add('active');
+        label.textContent = '5s';
+        refreshActiveTab(); // immediate first refresh
+    }
+}
+
 // --- Color palette ---
 const C = {
     correction: '#ff4757', decision: '#ffa235', discovery: '#a78bfa',
