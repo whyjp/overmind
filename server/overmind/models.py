@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 EventType = Literal["decision", "correction", "discovery", "change", "broadcast"]
 Priority = Literal["normal", "urgent"]
+FeedbackType = Literal["prevented_error", "helpful", "irrelevant"]
 
 
 class MemoryEvent(BaseModel):
@@ -27,6 +28,8 @@ class MemoryEvent(BaseModel):
     process: list[str] = Field(default_factory=list)
     priority: Priority = "normal"
     scope: str | None = None
+    summary: str | None = None
+    prevented_count: int = 0
 
 
 class PushEventInput(BaseModel):
@@ -115,6 +118,24 @@ class ReportResponse(BaseModel):
     total_pulls: int
     unique_users: int
     events_by_type: dict[str, int]
+    total_feedback: int = 0
+    prevented_errors: int = 0
+
+
+class FeedbackRequest(BaseModel):
+    """Request body for POST /api/memory/feedback."""
+
+    repo_id: str
+    event_id: str
+    user: str
+    type: FeedbackType
+
+
+class FeedbackResponse(BaseModel):
+    """Response for POST /api/memory/feedback."""
+
+    recorded: bool
+    prevented_count: int
 
 
 class GraphNode(BaseModel):
