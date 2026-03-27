@@ -11,9 +11,8 @@ let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
 let activeScope = null; // currently selected scope filter
 let activeAgent = null; // currently selected agent filter (flow view)
 
-// --- Auto-refresh ---
-let autoRefreshInterval = null;
-const AUTO_REFRESH_MS = 5000;
+// --- Auto-refresh (SSE) ---
+let autoRefreshSource = null;  // EventSource for SSE
 
 function getActiveTab() {
     const active = document.querySelector('.tab.active');
@@ -74,16 +73,57 @@ async function refreshRepoList() {
 function toggleAutoRefresh() {
     const btn = document.getElementById('auto-refresh-btn');
     const label = document.getElementById('auto-refresh-label');
-    if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
-        autoRefreshInterval = null;
+
+    if (autoRefreshSource) {
+        // SSE active → disconnect
+        autoRefreshSource.close();
+        autoRefreshSource = null;
         btn.classList.remove('active');
         label.textContent = 'AUTO';
-    } else {
-        autoRefreshInterval = setInterval(refreshActiveTab, AUTO_REFRESH_MS);
-        btn.classList.add('active');
-        label.textContent = '5s';
-        refreshActiveTab(); // immediate first refresh
+        return;
+    }
+
+    // Need a repo to subscribe
+    if (!currentRepo) {
+        refreshRepoList().then(() => {
+            if (currentRepo) toggleAutoRefresh();  // retry after repo selected
+        });
+        return;
+    }
+
+    // Open SSE connection
+    const url = `${API}/api/stream?repo_id=${enc(currentRepo)}`;
+    autoRefreshSource = new EventSource(url);
+
+    autoRefreshSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'update') {
+                refreshActiveTab();
+            }
+            // 'connected' type — just confirms stream is alive
+        } catch (e) {
+            console.warn('SSE parse error:', e);
+        }
+    };
+
+    autoRefreshSource.onerror = () => {
+        // Auto-reconnect is built into EventSource, just log
+        console.warn('SSE connection error — will auto-reconnect');
+    };
+
+    btn.classList.add('active');
+    label.textContent = 'LIVE';
+    refreshActiveTab();  // immediate first refresh
+}
+
+// Reconnect SSE when repo changes
+function reconnectSSE() {
+    if (autoRefreshSource) {
+        autoRefreshSource.close();
+        autoRefreshSource = null;
+        // Re-open with new repo
+        toggleAutoRefresh();
     }
 }
 
@@ -137,6 +177,7 @@ document.querySelectorAll('.view-btn').forEach(btn => {
 async function loadAll() {
     currentRepo = document.getElementById('repo-id').value;
     if (!currentRepo) return;
+    reconnectSSE();  // reconnect SSE to new repo if active
     await Promise.all([loadOverview(), loadGraphData(), loadFlowData(), loadTimelineData()]);
 }
 

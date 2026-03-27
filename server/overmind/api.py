@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -10,6 +12,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import StreamingResponse
 
 from overmind.models import (
     BroadcastRequest,
@@ -114,5 +117,25 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
         for evt in pull_resp.events:
             swimlanes[evt.user].append(evt.model_dump())
         return {"swimlanes": swimlanes}
+
+    @app.get("/api/stream")
+    async def event_stream(repo_id: str = Query(...)):
+        """SSE endpoint: sends 'update' event when repo data changes."""
+        async def generate():
+            last_version = store.get_version(repo_id)
+            # Send initial version so client knows connection is alive
+            yield f"data: {json.dumps({'type': 'connected', 'version': last_version})}\n\n"
+            while True:
+                await asyncio.sleep(1)
+                current = store.get_version(repo_id)
+                if current != last_version:
+                    yield f"data: {json.dumps({'type': 'update', 'version': current})}\n\n"
+                    last_version = current
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return app

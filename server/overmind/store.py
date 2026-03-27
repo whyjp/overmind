@@ -47,6 +47,8 @@ class MemoryStore:
         self._seen_ids: dict[str, set[str]] = defaultdict(set)
         # Pull history: {repo_id -> [(user, event_id, ts)]}
         self._pull_log: dict[str, list[dict]] = defaultdict(list)
+        # Version counter per repo — increments on every push (for SSE change detection)
+        self._version: dict[str, int] = defaultdict(int)
 
     # ------------------------------------------------------------------
     # Repo listing
@@ -143,7 +145,17 @@ class MemoryStore:
             seen.add(evt.id)
             accepted += 1
 
+        # Bump version for SSE change detection
+        if accepted > 0:
+            repo_ids = {evt.repo_id for evt in events}
+            for rid in repo_ids:
+                self._version[rid] += 1
+
         return accepted, duplicates
+
+    def get_version(self, repo_id: str) -> int:
+        """Return current version counter for a repo (for SSE change detection)."""
+        return self._version[repo_id]
 
     # ------------------------------------------------------------------
     # Pull
