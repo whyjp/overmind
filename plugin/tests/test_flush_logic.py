@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from api_client import build_change_events
+from api_client import build_change_events, should_flush
 
 
 class TestBuildChangeEvents:
@@ -73,3 +73,60 @@ class TestBuildChangeEvents:
         ]
         events = build_change_events(pending)
         assert events[0]["type"] == "change"
+
+
+class TestShouldFlush:
+    """should_flush(state, new_scope) checks count/time/scope-change triggers."""
+
+    def test_empty_pending_no_flush(self):
+        state = {"pending_changes": [], "last_push_ts": "2026-03-27T10:00:00Z"}
+        assert should_flush(state, "src/auth/*") is False
+
+    def test_threshold_reached(self):
+        state = {
+            "pending_changes": [{"scope": "src/auth/*"}] * 5,
+            "last_push_ts": "2026-03-27T10:00:00Z",
+            "current_scope": "src/auth/*",
+        }
+        assert should_flush(state, "src/auth/*") is True
+
+    def test_below_threshold(self):
+        state = {
+            "pending_changes": [{"scope": "src/auth/*"}] * 3,
+            "last_push_ts": datetime.now(timezone.utc).isoformat(),
+            "current_scope": "src/auth/*",
+        }
+        assert should_flush(state, "src/auth/*") is False
+
+    def test_time_exceeded(self):
+        old_ts = "2026-03-27T00:00:00+00:00"  # Many hours ago
+        state = {
+            "pending_changes": [{"scope": "src/auth/*"}],
+            "last_push_ts": old_ts,
+            "current_scope": "src/auth/*",
+        }
+        assert should_flush(state, "src/auth/*") is True
+
+    def test_scope_change(self):
+        state = {
+            "pending_changes": [{"scope": "src/auth/*"}],
+            "last_push_ts": datetime.now(timezone.utc).isoformat(),
+            "current_scope": "src/auth/*",
+        }
+        assert should_flush(state, "src/cache/*") is True
+
+    def test_no_last_push_ts_uses_time_trigger(self):
+        state = {
+            "pending_changes": [{"scope": "src/auth/*"}],
+            "current_scope": "src/auth/*",
+        }
+        # No last_push_ts → should flush (treat as stale)
+        assert should_flush(state, "src/auth/*") is True
+
+    def test_scope_change_with_no_pending_no_flush(self):
+        state = {
+            "pending_changes": [],
+            "last_push_ts": datetime.now(timezone.utc).isoformat(),
+            "current_scope": "src/auth/*",
+        }
+        assert should_flush(state, "src/cache/*") is False

@@ -115,6 +115,36 @@ FLUSH_THRESHOLD = int(os.environ.get("OVERMIND_FLUSH_THRESHOLD", "5"))
 FLUSH_INTERVAL = int(os.environ.get("OVERMIND_FLUSH_INTERVAL", "1800"))
 
 
+def should_flush(state: dict, new_scope: str) -> bool:
+    """Check if pending_changes should be flushed based on count/time/scope-change."""
+    pending = state.get("pending_changes", [])
+    if not pending:
+        return False
+
+    # Count trigger
+    if len(pending) >= FLUSH_THRESHOLD:
+        return True
+
+    # Time trigger
+    last_push = state.get("last_push_ts")
+    if not last_push:
+        return True  # never pushed → flush
+    try:
+        last_dt = datetime.fromisoformat(last_push)
+        now = datetime.now(timezone.utc)
+        if (now - last_dt).total_seconds() >= FLUSH_INTERVAL:
+            return True
+    except (ValueError, TypeError):
+        return True
+
+    # Scope change trigger
+    current_scope = state.get("current_scope")
+    if current_scope and current_scope != new_scope:
+        return True
+
+    return False
+
+
 def build_change_events(pending: list[dict]) -> list[dict]:
     """Group pending changes by scope into change event dicts."""
     if not pending:
