@@ -140,3 +140,10 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 - `core.autocrlf = false`
 - 커밋 메시지: conventional commits (feat/fix/refactor/chore/docs)
 - 한글 사용 가능 (PRD, 연구문서, 이벤트 데이터 등)
+
+## Design Principles
+
+- **SOLID 원칙 준수**: 단일 책임, 개방-폐쇄, 리스코프 치환, 인터페이스 분리, 의존성 역전을 지킨다.
+- **지속 가능한 프로젝트**: 유지보수성을 최우선으로 고려한다. 당장 동작하는 코드보다 오래 유지할 수 있는 코드를 작성한다.
+- **인터페이스 우선**: 구현체를 교체할 수 있도록 Protocol/ABC로 계약을 먼저 정의한다.
+- **테스트가 regression guard**: 기존 테스트가 깨지지 않는 범위에서 리팩토링한다.
