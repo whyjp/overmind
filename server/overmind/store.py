@@ -122,6 +122,7 @@ class SQLiteStore:
         """INSERT new events with dedup. Returns (accepted, duplicates)."""
         accepted = 0
         duplicates = 0
+        accepted_repos: set[str] = set()
 
         for evt in events:
             # Check existence
@@ -151,12 +152,12 @@ class SQLiteStore:
                 ),
             )
             accepted += 1
+            accepted_repos.add(evt.repo_id)
 
         if accepted > 0:
             await self.db.commit()
             self._global_version += 1
-            repo_ids = {evt.repo_id for evt in events}
-            for rid in repo_ids:
+            for rid in accepted_repos:
                 self._version[rid] += 1
 
         return accepted, duplicates
@@ -605,7 +606,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo_id);
-CREATE INDEX IF NOT EXISTS idx_events_repo_ts ON events(repo_id, ts);
+CREATE INDEX IF NOT EXISTS idx_events_repo_ts ON events(repo_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_repo_user ON events(repo_id, user);
 CREATE INDEX IF NOT EXISTS idx_events_repo_scope ON events(repo_id, scope);
 

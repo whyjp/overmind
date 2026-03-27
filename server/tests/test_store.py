@@ -38,6 +38,13 @@ def _make_event(
     )
 
 
+class TestInit:
+    @pytest.mark.asyncio
+    async def test_init_creates_db(self, store, data_dir):
+        db_path = data_dir / "overmind.db"
+        assert db_path.exists()
+
+
 class TestPush:
     @pytest.mark.asyncio
     async def test_push_single_event(self, store):
