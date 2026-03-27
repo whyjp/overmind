@@ -132,3 +132,37 @@ class TestShouldFlush:
             "current_scope": "src/auth/*",
         }
         assert should_flush(state, "src/cache/*") is False
+
+
+class TestBuildChangeEventsEnriched:
+    """build_change_events with diff_summary and context enrichment."""
+
+    def _make_pending(self, context=None):
+        entry = {"file": "src/auth/login.ts", "scope": "src/auth/*", "ts": "2026-03-27T10:00:00Z", "action": "Edit"}
+        if context is not None:
+            entry["context"] = context
+        return [entry]
+
+    def test_result_includes_diff(self):
+        pending = self._make_pending()
+        events = build_change_events(pending, diff_summary="+port = 9090")
+        assert "Diff:\n+port = 9090" in events[0]["result"]
+
+    def test_result_includes_context(self):
+        pending = self._make_pending(context="Fixing auth timeout bug")
+        events = build_change_events(pending)
+        assert "Context: Fixing auth timeout bug" in events[0]["result"]
+
+    def test_result_includes_both(self):
+        pending = self._make_pending(context="Fixing auth timeout bug")
+        events = build_change_events(pending, diff_summary="+timeout = 30")
+        result = events[0]["result"]
+        assert "Context: Fixing auth timeout bug" in result
+        assert "Diff:\n+timeout = 30" in result
+        # Context should come before Diff
+        assert result.index("Context:") < result.index("Diff:")
+
+    def test_fallback_what_only(self):
+        pending = self._make_pending()
+        events = build_change_events(pending)
+        assert events[0]["result"] == "Modified src/auth/* (1 file: login.ts)"

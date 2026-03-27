@@ -147,7 +147,7 @@ def should_flush(state: dict, new_scope: str) -> bool:
     return False
 
 
-def build_change_events(pending: list[dict]) -> list[dict]:
+def build_change_events(pending: list[dict], diff_summary: str = "") -> list[dict]:
     """Group pending changes by scope into change event dicts.
 
     Phase 2 TODO: when entry['lesson'] is not None, use lesson to determine
@@ -157,11 +157,15 @@ def build_change_events(pending: list[dict]) -> list[dict]:
         return []
 
     scope_files: dict[str, list[str]] = defaultdict(list)
+    scope_contexts: dict[str, list[str]] = defaultdict(list)
     for entry in pending:
         scope = entry["scope"]
         f = entry["file"]
         if f not in scope_files[scope]:
             scope_files[scope].append(f)
+        ctx = entry.get("context")
+        if ctx and ctx not in scope_contexts[scope]:
+            scope_contexts[scope].append(ctx)
 
     now = datetime.now(timezone.utc).isoformat()
     events = []
@@ -169,7 +173,17 @@ def build_change_events(pending: list[dict]) -> list[dict]:
         basenames = [f.replace("\\", "/").rsplit("/", 1)[-1] for f in files]
         count = len(files)
         file_label = "file" if count == 1 else "files"
-        result = f"Modified {scope} ({count} {file_label}: {', '.join(sorted(basenames))})"
+        what = f"Modified {scope} ({count} {file_label}: {', '.join(sorted(basenames))})"
+
+        parts = [what]
+        contexts = scope_contexts.get(scope, [])
+        if contexts:
+            parts.append(f"Context: {'; '.join(contexts)}")
+        if diff_summary:
+            parts.append(f"Diff:\n{diff_summary}")
+
+        result = "\n".join(parts)
+
         events.append({
             "id": f"auto_{uuid.uuid4().hex[:12]}",
             "type": "change",
@@ -184,11 +198,15 @@ def build_change_events(pending: list[dict]) -> list[dict]:
 
 def flush_pending_changes(state: dict, repo_id: str, user: str) -> dict:
     """Flush all pending_changes → push scope-grouped change events. Returns updated state."""
+    from diff_collector import collect_diff_summary
+
     pending = state.get("pending_changes", [])
     if not pending:
         return state
 
-    events = build_change_events(pending)
+    all_files = list({e["file"] for e in pending})
+    diff_summary = collect_diff_summary(all_files)
+    events = build_change_events(pending, diff_summary=diff_summary)
     if events:
         api_post("/api/memory/push", {
             "repo_id": repo_id,
