@@ -687,17 +687,38 @@ function renderFlowView(data) {
     const evtDimmed = id => agentConn && !agentConn.has(id);
     const edgeDimmed = i => agentEdgeSet && !agentEdgeSet.has(i);
 
+    // --- Collect ghost positions per agent (for sequential edges) ---
+    // ghostPositions[agent] = [{x, y, ts}, ...] — positions of pull clones on this agent's lane
+    const ghostPositions = {};
+    const ghostSeenForSeq = new Set();
+    flowEdges.forEach(d => {
+        if (!evtPos[d.srcId]) return;
+        const ghostKey = `${d.srcId}@${d.puller}`;
+        if (ghostSeenForSeq.has(ghostKey)) return;
+        ghostSeenForSeq.add(ghostKey);
+        const srcEvt = events.find(e => e.id === d.srcId);
+        if (!srcEvt) return;
+        const gx = evtPos[d.srcId].x;
+        const gy = yScale(d.puller) + yScale.bandwidth() / 2;
+        (ghostPositions[d.puller] = ghostPositions[d.puller] || []).push({
+            x: gx, y: gy, ts: srcEvt.ts,
+        });
+    });
+
     // --- Intra-agent sequential edges (gray solid lines) ---
+    // Merge push nodes + ghost nodes per agent, sort by X, connect sequentially
     agents.forEach(agent => {
-        const evts = agentEvents[agent] || [];
-        for (let i = 0; i < evts.length - 1; i++) {
-            const from = evtPos[evts[i].id];
-            const to = evtPos[evts[i + 1].id];
-            if (!from || !to) continue;
+        const pushNodes = (agentEvents[agent] || [])
+            .filter(e => evtPos[e.id])
+            .map(e => ({ x: evtPos[e.id].x, y: evtPos[e.id].y, ts: e.ts }));
+        const ghostNodes = ghostPositions[agent] || [];
+        const allNodes = [...pushNodes, ...ghostNodes].sort((a, b) => a.x - b.x);
+
+        for (let i = 0; i < allNodes.length - 1; i++) {
             g.append('line')
-                .attr('x1', from.x).attr('y1', from.y)
-                .attr('x2', to.x).attr('y2', to.y)
-                .attr('stroke', 'rgba(200,214,229,0.15)')
+                .attr('x1', allNodes[i].x).attr('y1', allNodes[i].y)
+                .attr('x2', allNodes[i + 1].x).attr('y2', allNodes[i + 1].y)
+                .attr('stroke', 'rgba(200,214,229,0.18)')
                 .attr('stroke-width', 1.2)
                 .attr('class', 'flow-seq-edge');
         }
@@ -889,7 +910,7 @@ function renderFlowView(data) {
         }
 
         // Agent status summary at the right edge of the lane
-        const rightEdge = effectiveW - margin.right + 4;
+        const rightEdge = effectiveW + 20;
         const statusLines = [];
         if (agentEvts.length > 0) {
             statusLines.push({ text: `\u25B6 ${agentEvts.length} pushed`, color: C[agentEvts[agentEvts.length - 1].type] || C.change });
@@ -902,7 +923,7 @@ function renderFlowView(data) {
         statusLines.forEach((line, i) => {
             g.append('text')
                 .attr('x', rightEdge)
-                .attr('y', laneY - 8 + i * 12)
+                .attr('y', laneY - 10 + i * 20)
                 .attr('text-anchor', 'start')
                 .attr('fill', line.color)
                 .attr('font-size', '16px')
