@@ -7,9 +7,10 @@
 
 Phase 1의 JSONL file-based store는 기능적으로 완전하지만, 이벤트가 증가하면 `_read_repo_events()`의 전체 파일 스캔이 병목이 된다. 또한 pull 응답에서 불필요한 필드(process, prompt)가 컨텍스트 토큰을 소모한다.
 
-Phase 2-A Part 1은 두 가지를 해결한다:
+Phase 2-A Part 1은 세 가지를 해결한다:
 1. JSONL → SQLite 완전 교체 (인덱스 쿼리, 단일 파일 관리)
 2. `?detail=summary|full` 파라미터로 pull 응답 경량화
+3. 비동기 DB 드라이버(aiosqlite)로 이벤트 루프 블로킹 방지
 
 기존 JSONL 데이터는 폐기한다 (개발 단계, 마이그레이션 불필요).
 
@@ -18,6 +19,7 @@ Phase 2-A Part 1은 두 가지를 해결한다:
 - SOLID 원칙 준수: StoreProtocol로 인터페이스 분리, 향후 벡터DB 이관 대비
 - 기존 53개 서버 테스트가 regression guard — 인터페이스 유지로 최소 변경
 - Bottom-Up: 스키마 → Store 교체 → API 확장 → cleanup 어댑트
+- 비동기 우선: FastAPI async 핸들러와 자연스럽게 결합, DB I/O가 이벤트 루프를 블로킹하지 않도록
 
 ## 1. SQLite 스키마
 
@@ -63,6 +65,14 @@ CREATE UNIQUE INDEX idx_pull_dedup ON pull_log(repo_id, puller, event_id);
 
 ## 2. StoreProtocol + SQLiteStore
 
+### 비동기 드라이버: aiosqlite
+
+`aiosqlite`는 sqlite3 위의 async wrapper로, `async with aiosqlite.connect()` + `await conn.execute()` 패턴을 지원한다. pyproject.toml에 `aiosqlite >= 0.20.0` 의존성 추가.
+
+모든 store 퍼블릭 메서드를 `async def`로 정의한다. 이에 따라:
+- API 핸들러에서 `await store.pull(...)` 호출
+- 테스트에서 `await` 또는 `pytest-asyncio` 사용
+
 ### StoreProtocol
 
 ```python
@@ -72,34 +82,57 @@ class StoreProtocol(Protocol):
     """Storage backend contract. 모든 store 구현체가 준수해야 할 인터페이스.
     향후 벡터DB 등으로 교체 시 이 Protocol을 구현한다."""
 
-    def push(self, events: list[MemoryEvent]) -> tuple[int, int]: ...
-    def pull(self, repo_id: str, *, user=None, exclude_user=None,
-             since=None, scope=None, limit=100,
-             detail="full") -> PullResponse: ...
-    def list_repos(self) -> list[str]: ...
-    def get_repo_stats(self, repo_id: str, *, since=None, until=None,
-                       period="7d") -> ReportResponse: ...
-    def get_graph_data(self, repo_id: str) -> GraphResponse: ...
-    def get_flow_data(self, repo_id: str) -> dict: ...
+    async def push(self, events: list[MemoryEvent]) -> tuple[int, int]: ...
+    async def pull(self, repo_id: str, *, user=None, exclude_user=None,
+                   since=None, scope=None, limit=100,
+                   detail="full") -> PullResponse: ...
+    async def list_repos(self) -> list[str]: ...
+    async def get_repo_stats(self, repo_id: str, *, since=None, until=None,
+                             period="7d") -> ReportResponse: ...
+    async def get_graph_data(self, repo_id: str) -> GraphResponse: ...
+    async def get_flow_data(self, repo_id: str) -> dict: ...
     def get_version(self, repo_id: str) -> int: ...
     def get_global_version(self) -> int: ...
-    def cleanup_expired(self, repo_id: str, ttl_days: int = 30) -> int: ...
+    async def cleanup_expired(self, repo_id: str, ttl_days: int = 30) -> int: ...
 ```
+
+`get_version`, `get_global_version`은 인메모리 카운터 접근만이므로 동기 유지.
 
 ### 메서드 매핑
 
 | 현재 (JSONL) | SQLite 구현 |
 |---|---|
-| `__init__(data_dir)` | `sqlite3.connect(data_dir/overmind.db)` + CREATE TABLE IF NOT EXISTS |
-| `push(events)` | `INSERT OR IGNORE INTO events` (PK dedup, `_seen_ids` 제거) |
-| `pull(repo_id, ...)` | `SELECT ... WHERE` + 인덱스. scope는 파이썬 fnmatch로 필터 |
-| `get_version(repo_id)` | 인메모리 카운터 유지 (SSE용) |
-| `get_global_version()` | 인메모리 카운터 유지 |
-| `list_repos()` | `SELECT DISTINCT repo_id FROM events` |
-| `get_repo_stats(...)` | `SELECT COUNT(*)` + GROUP BY 집계 |
-| `get_graph_data(repo_id)` | 이벤트 SELECT 후 기존 그래프 로직 유지 |
+| `__init__(data_dir)` | DB 경로만 저장. 실제 연결은 `async def init_db()`에서 `aiosqlite.connect()` + CREATE TABLE |
+| `push(events)` | `await conn.execute("INSERT OR IGNORE ...")` (PK dedup, `_seen_ids` 제거) |
+| `pull(repo_id, ...)` | `await conn.execute("SELECT ...")` + 파이썬 fnmatch scope 필터 |
+| `get_version(repo_id)` | 인메모리 카운터 (동기, SSE용) |
+| `get_global_version()` | 인메모리 카운터 (동기) |
+| `list_repos()` | `await conn.execute("SELECT DISTINCT repo_id FROM events")` |
+| `get_repo_stats(...)` | `await conn.execute("SELECT COUNT(*) ...")` + GROUP BY 집계 |
+| `get_graph_data(repo_id)` | `await` 이벤트 SELECT 후 기존 그래프 로직 유지 |
 | `get_flow_data(repo_id)` | 동일 패턴 |
-| `cleanup_expired(...)` | `DELETE FROM events WHERE repo_id=? AND ts < ?` |
+| `cleanup_expired(...)` | `await conn.execute("DELETE FROM events WHERE ...")` |
+
+### DB 초기화 패턴
+
+```python
+class SQLiteStore:
+    def __init__(self, data_dir: Path):
+        self._db_path = data_dir / "overmind.db"
+        self._conn: aiosqlite.Connection | None = None
+
+    async def init_db(self):
+        """앱 시작 시 호출. FastAPI lifespan에서 await store.init_db()."""
+        self._conn = await aiosqlite.connect(self._db_path)
+        await self._conn.executescript(SCHEMA_SQL)
+
+    async def close(self):
+        """앱 종료 시 호출."""
+        if self._conn:
+            await self._conn.close()
+```
+
+FastAPI lifespan에서 `init_db()` / `close()` 호출.
 
 ### 삭제되는 코드
 
@@ -181,17 +214,17 @@ store를 import하지 않고 `sqlite3`로 직접 접속 (스크립트 독립성)
 
 | 파일 | 변경 |
 |------|------|
-| `test_store.py` (11개) | import 변경: `MemoryStore` → `SQLiteStore` |
-| `test_api.py` (11개) | 변경 없음 — create_app 내부에서 SQLiteStore 생성 |
-| `test_mcp.py` (3개) | 변경 없음 |
-| scenarios (19개) | 변경 없음 |
-| `test_models.py` (7개) | 변경 없음 |
+| `test_store.py` (11개) | import 변경 + `async def` + `@pytest.mark.asyncio`. fixture에서 `await store.init_db()` |
+| `test_api.py` (11개) | create_app이 lifespan에서 init_db 호출 → httpx AsyncClient 사용 시 자동 처리 |
+| `test_mcp.py` (3개) | 동일 — create_app 경유 |
+| scenarios (19개) | ServerThread 내에서 lifespan이 init_db 호출 → 변경 최소 |
+| `test_models.py` (7개) | 변경 없음 — 모델만 테스트 |
 
 ### 추가 테스트
 
 | 테스트 | 내용 |
 |--------|------|
-| `test_store.py::test_pull_detail_summary` | `pull(detail="summary")`에서 process=[], prompt=None 확인 |
+| `test_store.py::test_pull_detail_summary` | `await pull(detail="summary")`에서 process=[], prompt=None 확인 |
 | `test_api.py::test_pull_detail_param` | `GET /api/memory/pull?detail=summary` API 레벨 확인 |
 
 ### 성공 기준
@@ -207,5 +240,7 @@ store를 import하지 않고 `sqlite3`로 직접 접속 (스크립트 독립성)
 | 수정 | `server/tests/test_store.py` (import + detail 테스트) |
 | 수정 | `server/tests/test_api.py` (detail 테스트 추가) |
 | 수정 | `server/scripts/db_cleanup.py` (SQLite 쿼리로 교체) |
+| 수정 | `server/pyproject.toml` (aiosqlite 의존성 추가) |
+| 수정 | `server/overmind/main.py` (lifespan에서 store.init_db/close 호출) |
 
-변경 없는 파일: models.py, mcp_server.py, main.py, plugin/ 전체, dashboard/ 전체.
+변경 없는 파일: models.py, mcp_server.py, plugin/ 전체, dashboard/ 전체.
