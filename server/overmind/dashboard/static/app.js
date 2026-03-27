@@ -10,6 +10,8 @@ let timelineData = null;
 let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
 let activeScope = null; // currently selected scope filter
 let activeAgent = null; // currently selected agent filter (flow view)
+let flowTimeZoomK = 1;    // flow view time axis zoom level
+let flowTimePanOffset = 0; // flow view time axis pan offset
 
 // --- Auto-refresh (SSE) ---
 let autoRefreshSource = null;  // EventSource for SSE
@@ -172,6 +174,8 @@ document.querySelectorAll('.view-btn').forEach(btn => {
         graphViewMode = btn.dataset.view;
         activeScope = null;
         activeAgent = null;
+        flowTimeZoomK = 1;
+        flowTimePanOffset = 0;
         renderGraph(graphData);
     });
 });
@@ -435,12 +439,21 @@ function renderFlowView(data) {
 
     svg.attr('width', W).attr('height', totalH).attr('viewBox', `0 0 ${W} ${totalH}`);
 
-    // Time scale
+    // Time scale — domain stored for Ctrl+Wheel zoom
     const timeExtent = d3.extent(events, d => new Date(d.ts));
-    const pad = (timeExtent[1] - timeExtent[0]) * 0.08 || 3600000;
-    const xScale = d3.scaleTime()
-        .domain([new Date(timeExtent[0] - pad), new Date(+timeExtent[1] + pad)])
-        .range([margin.left + 20, W - margin.right - 20]);
+    const timePad = (timeExtent[1] - timeExtent[0]) * 0.08 || 3600000;
+    const baseTimeDomain = [new Date(timeExtent[0] - timePad), new Date(+timeExtent[1] + timePad)];
+    const xRange = [margin.left + 20, W - margin.right - 20];
+    const xScale = d3.scaleTime().domain(baseTimeDomain).range(xRange);
+
+    function getZoomedXScale() {
+        const mid = (+baseTimeDomain[0] + +baseTimeDomain[1]) / 2;
+        const halfSpan = (+baseTimeDomain[1] - +baseTimeDomain[0]) / 2 / flowTimeZoomK;
+        const offset = flowTimePanOffset * (+baseTimeDomain[1] - +baseTimeDomain[0]) / 2;
+        return d3.scaleTime()
+            .domain([new Date(mid - halfSpan + offset), new Date(mid + halfSpan + offset)])
+            .range(xRange);
+    }
 
     // Agent Y scale
     const yScale = d3.scaleBand()
@@ -449,8 +462,72 @@ function renderFlowView(data) {
         .padding(0.2);
 
     const g = svg.append('g');
-    svg.call(d3.zoom().scaleExtent([0.3, 4]).on('zoom', e => g.attr('transform', e.transform)));
+
+    // --- Zoom ---
+    // Drag = pan both axes (uniform transform on g)
+    // Ctrl+Wheel = zoom time axis only (re-renders node positions)
+    const uniformZoom = d3.zoom()
+        .scaleExtent([0.3, 4])
+        .filter(event => !event.ctrlKey) // skip Ctrl events
+        .on('zoom', e => g.attr('transform', e.transform));
+    svg.call(uniformZoom);
+
+    // Ctrl+Wheel: zoom time axis, re-layout nodes
+    svg.on('wheel', (event) => {
+        if (!event.ctrlKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const factor = event.deltaY > 0 ? 0.85 : 1.15;
+        flowTimeZoomK = Math.max(0.5, Math.min(30, flowTimeZoomK * factor));
+
+        // Re-render with new time zoom (debounced via requestAnimationFrame)
+        requestAnimationFrame(() => renderFlowView(data));
+    }, { passive: false });
+
+    // Shift+Wheel: pan time axis
+    svg.on('wheel.timepan', (event) => {
+        if (!event.shiftKey || event.ctrlKey) return;
+        event.preventDefault();
+        const panStep = 0.05 / flowTimeZoomK;
+        flowTimePanOffset += event.deltaY > 0 ? panStep : -panStep;
+        requestAnimationFrame(() => renderFlowView(data));
+    }, { passive: false });
+
+    // Ctrl+0: reset time zoom
+    svg.on('keydown', (event) => {
+        if (event.ctrlKey && event.key === '0') {
+            event.preventDefault();
+            flowTimeZoomK = 1;
+            flowTimePanOffset = 0;
+            renderFlowView(data);
+        }
+    });
+    // Make SVG focusable for keyboard events
+    svg.attr('tabindex', 0);
+
+    // Apply current time zoom
+    const zoomedX = flowTimeZoomK !== 1 || flowTimePanOffset !== 0 ? getZoomedXScale() : xScale;
+
+    // Compute SVG width needed — expand if zoomed in
+    const effectiveW = Math.max(W, (W - margin.left - margin.right) * flowTimeZoomK + margin.left + margin.right);
+    svg.attr('width', effectiveW).attr('height', totalH).attr('viewBox', `0 0 ${effectiveW} ${totalH}`);
+
+    // Update xScale range for expanded width
+    if (flowTimeZoomK > 1) {
+        zoomedX.range([margin.left + 20, effectiveW - margin.right - 20]);
+    }
+
     svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
+
+    // Time zoom indicator
+    if (flowTimeZoomK !== 1) {
+        svg.append('text')
+            .attr('x', effectiveW - 10).attr('y', 16)
+            .attr('text-anchor', 'end')
+            .attr('fill', C.accent).attr('font-size', '10px').attr('opacity', 0.6)
+            .text(`Time: ${flowTimeZoomK.toFixed(1)}x  (Ctrl+Wheel: zoom, Shift+Wheel: pan, Ctrl+0: reset)`);
+    }
 
     // Defs
     const defs = svg.append('defs');
@@ -473,9 +550,9 @@ function renderFlowView(data) {
     });
 
     // Grid lines
-    xScale.ticks(8).forEach(tick => {
+    zoomedX.ticks(Math.max(8, Math.round(8 * flowTimeZoomK))).forEach(tick => {
         g.append('line')
-            .attr('x1', xScale(tick)).attr('x2', xScale(tick))
+            .attr('x1', zoomedX(tick)).attr('x2', zoomedX(tick))
             .attr('y1', margin.top).attr('y2', margin.top + agents.length * laneH)
             .attr('stroke', '#0d1520').attr('stroke-width', 1);
     });
@@ -483,7 +560,7 @@ function renderFlowView(data) {
     // Time axis
     const axisG = g.append('g')
         .attr('transform', `translate(0,${margin.top + agents.length * laneH + 4})`)
-        .call(d3.axisBottom(xScale).ticks(8).tickSize(0).tickPadding(8));
+        .call(d3.axisBottom(zoomedX).ticks(Math.max(8, Math.round(8 * flowTimeZoomK))).tickSize(0).tickPadding(8));
     axisG.select('.domain').attr('stroke', '#1a2332');
     axisG.selectAll('text').attr('fill', '#364152').attr('font-size', '10px');
 
@@ -491,7 +568,7 @@ function renderFlowView(data) {
     const evtPos = {};
     events.forEach(evt => {
         evtPos[evt.id] = {
-            x: xScale(new Date(evt.ts)),
+            x: zoomedX(new Date(evt.ts)),
             y: yScale(evt.user) + yScale.bandwidth() / 2,
         };
     });
