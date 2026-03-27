@@ -72,6 +72,32 @@ class TestPullEndpoint:
         body = resp.json()
         assert body["count"] == 1
 
+    async def test_pull_detail_summary(self, client):
+        await client.post("/api/memory/push", json={
+            "repo_id": "github.com/test/repo",
+            "user": "dev_a",
+            "events": [{
+                "id": "evt_detail_api",
+                "type": "correction",
+                "ts": "2026-03-26T05:30:00Z",
+                "result": "found the bug",
+                "files": ["src/auth/login.ts"],
+                "process": ["step1", "step2"],
+                "prompt": "fix the auth bug",
+            }],
+        })
+        resp = await client.get("/api/memory/pull", params={
+            "repo_id": "github.com/test/repo",
+            "detail": "summary",
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 1
+        evt = body["events"][0]
+        assert evt["files"] == ["src/auth/login.ts"]
+        assert evt["process"] == []
+        assert evt["prompt"] is None
+
     async def test_pull_missing_repo_id(self, client):
         resp = await client.get("/api/memory/pull")
         assert resp.status_code == 422
