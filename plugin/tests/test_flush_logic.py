@@ -115,13 +115,15 @@ class TestShouldFlush:
         }
         assert should_flush(state, "src/cache/*") is True
 
-    def test_no_last_push_ts_uses_time_trigger(self):
+    def test_no_last_push_ts_initializes_not_flush(self):
         state = {
             "pending_changes": [{"scope": "src/auth/*"}],
             "current_scope": "src/auth/*",
         }
-        # No last_push_ts → should flush (treat as stale)
-        assert should_flush(state, "src/auth/*") is True
+        # No last_push_ts → initialize timestamp, don't flush (allow batching)
+        assert should_flush(state, "src/auth/*") is False
+        # State should now have last_push_ts set
+        assert "last_push_ts" in state
 
     def test_scope_change_with_no_pending_no_flush(self):
         state = {

@@ -152,34 +152,28 @@ class TestMultiAgentSimulation:
         _post_tool_use(env_a, "src/auth/routes.ts")
         _post_tool_use(env_a, "src/auth/middleware.ts")
 
-        # Verify accumulation in state
-        # Note: First file (jwt.ts) triggers flush on 2nd call due to "never pushed" trigger,
-        # so only routes.ts and middleware.ts remain pending
+        # Verify accumulation in state — all 3 pending, no premature flush
         state_a = json.loads((state_dir / "state_a.json").read_text())
-        assert len(state_a["pending_changes"]) == 2
+        assert len(state_a["pending_changes"]) == 3
         assert state_a["current_scope"] == "src/auth/*"
 
         # ── Phase 2: Agent B starts, enters auth scope ──
-        # Note: A's first file was already flushed on 2nd PostToolUse, so B will see it
+        # A hasn't flushed yet (3 < threshold 5), so B sees nothing
         out = run_hook("on_session_start.py", env_b)
-        assert out != "", "Agent A's first file should be visible"
-        parsed = json.loads(out)
-        assert "systemMessage" in parsed
-        assert "agent_a" in parsed["systemMessage"]
+        assert out == "", "A hasn't flushed yet — SessionStart should be silent"
 
-        # Agent B: PreToolUse on auth/middleware.ts - should see A's jwt.ts event
+        # Agent B: PreToolUse on auth/middleware.ts
+        # A hasn't pushed, so no cross-agent warning
         out = _pre_tool_use(env_b, "src/auth/middleware.ts")
-        assert out != "", "B should see A's auth/* event (jwt.ts)"
-        parsed = json.loads(out)
-        assert "agent_a" in parsed["systemMessage"]
+        assert out == "", "A hasn't flushed yet — no warning expected"
 
         # Agent B edits non-overlapping files
         _post_tool_use(env_b, "src/api/tasks.ts")
         _post_tool_use(env_b, "src/models/task.ts")
 
-        # ── Phase 3: Agent A hits flush threshold ──
-        _post_tool_use(env_a, "src/config/env.ts")  # scope change → flush auth/*
-        _post_tool_use(env_a, ".env.example")  # 5th total → also triggers count
+        # ── Phase 3: Agent A hits flush — scope change from auth/* to config/* ──
+        _post_tool_use(env_a, "src/config/env.ts")  # scope change → flush 3 auth/* files
+        _post_tool_use(env_a, ".env.example")  # scope change again → flush config/*
 
         # Verify A's auth/* events are now on server
         pull = _api_get(base_url, "/api/memory/pull", {
@@ -192,10 +186,9 @@ class TestMultiAgentSimulation:
                     any("src/auth/" in f for f in e.get("files", []))
                     for e in pull["events"])
 
-        # ── Phase 4: Agent B enters auth scope again — sees more A events ──
-        # After A's flush, B should see additional auth/* events (routes.ts, middleware.ts)
+        # ── Phase 4: Agent B enters auth scope again — NOW sees A's events ──
         out = _pre_tool_use(env_b, "src/auth/middleware.ts")
-        assert out != "", "B should see A's additional auth/* events"
+        assert out != "", "B should now see A's auth/* events after flush"
         parsed = json.loads(out)
         assert "systemMessage" in parsed
         assert "agent_a" in parsed["systemMessage"]

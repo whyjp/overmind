@@ -9,7 +9,11 @@ from api_client import flush_pending_changes, get_repo_id, get_user, load_state,
 
 
 def main():
-    input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    try:
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        input_data = json.loads(raw) if raw.strip() else {}
+    except (json.JSONDecodeError, ValueError):
+        input_data = {}
 
     repo_id = get_repo_id()
     if not repo_id:

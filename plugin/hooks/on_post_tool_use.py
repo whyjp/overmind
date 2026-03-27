@@ -19,7 +19,11 @@ from api_client import (
 
 
 def main():
-    input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    try:
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        input_data = json.loads(raw) if raw.strip() else {}
+    except (json.JSONDecodeError, ValueError):
+        input_data = {}
 
     tool_input = input_data.get("tool_input", {})
     file_path = tool_input.get("file_path", "")

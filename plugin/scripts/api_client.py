@@ -128,7 +128,9 @@ def should_flush(state: dict, new_scope: str) -> bool:
     # Time trigger
     last_push = state.get("last_push_ts")
     if not last_push:
-        return True  # never pushed → flush
+        # First accumulation — initialize timestamp, don't flush yet
+        state["last_push_ts"] = datetime.now(timezone.utc).isoformat()
+        return False
     try:
         last_dt = datetime.fromisoformat(last_push)
         now = datetime.now(timezone.utc)

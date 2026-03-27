@@ -6,7 +6,6 @@ const API = window.location.origin;
 let currentRepo = '';
 let graphData = null;
 let flowData = null;
-let timelineData = null;
 let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
 let activeScope = null; // currently selected scope filter
 let activeAgent = null; // currently selected agent filter (flow view)
@@ -35,7 +34,6 @@ async function refreshActiveTab() {
         const tab = getActiveTab();
         if (tab === 'overview') await loadOverview();
         else if (tab === 'graph') { await loadGraphData(); await loadFlowData(); }
-        else if (tab === 'timeline') await loadTimelineData();
     } catch (e) {
         console.warn('Refresh failed:', e);
     }
@@ -162,7 +160,6 @@ document.querySelectorAll('.tab').forEach(btn => {
         document.getElementById(btn.dataset.tab).classList.add('active');
         if (currentRepo) {
             if (btn.dataset.tab === 'graph') renderGraph(graphData);
-            if (btn.dataset.tab === 'timeline') renderTimeline(timelineData);
         }
     });
 });
@@ -197,7 +194,7 @@ async function loadAll() {
     currentRepo = document.getElementById('repo-id').value;
     if (!currentRepo) return;
     reconnectSSE();  // reconnect SSE to new repo if active
-    await Promise.all([loadOverview(), loadGraphData(), loadFlowData(), loadTimelineData()]);
+    await Promise.all([loadOverview(), loadGraphData(), loadFlowData()]);
 }
 
 // ============================================================
@@ -1388,122 +1385,6 @@ function renderGraphLegend(svg, H) {
         .attr('stroke', 'rgba(0,229,160,0.5)').attr('stroke-width', 1.5).attr('stroke-dasharray', '6,4');
     lg.append('text').attr('x', elX + 116).attr('y', 4)
         .attr('fill', '#364152').attr('font-size', '10px').text('pulled (consumed)');
-}
-
-// ============================================================
-// TIMELINE — Swimlane
-// ============================================================
-async function loadTimelineData() {
-    const res = await fetch(`${API}/api/report/timeline?repo_id=${enc(currentRepo)}`);
-    timelineData = await res.json();
-    if (document.getElementById('timeline').classList.contains('active')) {
-        renderTimeline(timelineData);
-    }
-}
-
-function renderTimeline(data) {
-    if (!data) return;
-    const svg = d3.select('#timeline-svg');
-    svg.selectAll('*').remove();
-    dismissPopover();
-
-    const users = Object.keys(data.swimlanes);
-    if (!users.length) return;
-
-    const laneH = 72;
-    const margin = { top: 48, right: 40, bottom: 44, left: 110 };
-    const ctr = document.getElementById('timeline-container');
-    const W = Math.max(800, ctr.clientWidth || 900);
-    const H = margin.top + users.length * laneH + margin.bottom;
-    svg.attr('viewBox', `0 0 ${W} ${H}`).attr('width', W).attr('height', H);
-
-    const allEvts = users.flatMap(u => data.swimlanes[u]);
-    if (!allEvts.length) return;
-
-    const ext = d3.extent(allEvts, d => new Date(d.ts));
-    // Add padding to time extent
-    const pad = (ext[1] - ext[0]) * 0.08 || 3600000;
-    const x = d3.scaleTime()
-        .domain([new Date(ext[0] - pad), new Date(+ext[1] + pad)])
-        .range([margin.left, W - margin.right]);
-    const y = d3.scaleBand().domain(users).range([margin.top, H - margin.bottom]).padding(0.15);
-
-    // Swimlane bg
-    svg.selectAll('.lane-bg')
-        .data(users).join('rect')
-        .attr('x', 0).attr('width', W)
-        .attr('y', d => y(d)).attr('height', y.bandwidth())
-        .attr('fill', (d, i) => i % 2 ? 'rgba(17,24,34,0.4)' : 'transparent')
-        .attr('rx', 0);
-
-    // Swimlane labels
-    svg.selectAll('.lane-label')
-        .data(users).join('text')
-        .attr('x', 16).attr('y', d => y(d) + y.bandwidth() / 2 + 4)
-        .attr('fill', C.user).attr('font-size', '12px').attr('font-weight', '600')
-        .text(d => d);
-
-    // Grid lines
-    const ticks = x.ticks(8);
-    svg.selectAll('.grid-line')
-        .data(ticks).join('line')
-        .attr('x1', d => x(d)).attr('x2', d => x(d))
-        .attr('y1', margin.top).attr('y2', H - margin.bottom)
-        .attr('stroke', '#111822').attr('stroke-width', 1);
-
-    // Broadcast lines
-    allEvts.filter(e => e.type === 'broadcast').forEach(evt => {
-        const bx = x(new Date(evt.ts));
-        svg.append('line')
-            .attr('x1', bx).attr('x2', bx)
-            .attr('y1', margin.top).attr('y2', H - margin.bottom)
-            .attr('stroke', C.broadcast).attr('stroke-width', 1.5)
-            .attr('stroke-dasharray', '6,4').attr('opacity', 0.5);
-        svg.append('text')
-            .attr('x', bx + 6).attr('y', margin.top - 6)
-            .attr('fill', C.broadcast).attr('font-size', '9px')
-            .text('BROADCAST');
-    });
-
-    // Events
-    users.forEach(user => {
-        const evts = data.swimlanes[user];
-        const dots = svg.selectAll(`.dot-${user.replace(/\W/g, '_')}`)
-            .data(evts).join('g')
-            .attr('class', 'tl-dot')
-            .attr('cursor', 'pointer')
-            .attr('transform', d => `translate(${x(new Date(d.ts))},${y(user) + y.bandwidth() / 2})`);
-
-        // Outer ring
-        dots.append('circle').attr('r', 14)
-            .attr('fill', d => (C[d.type] || C.change) + '15')
-            .attr('stroke', d => (C[d.type] || C.change) + '30')
-            .attr('stroke-width', 1);
-        // Inner dot
-        dots.append('circle').attr('r', 5)
-            .attr('fill', d => C[d.type] || C.change);
-        // Label
-        dots.append('text')
-            .attr('dy', 26).attr('text-anchor', 'middle')
-            .attr('fill', '#5a6a7e').attr('font-size', '9px')
-            .text(d => d.result.substring(0, 18) + (d.result.length > 18 ? '..' : ''));
-
-        // Click
-        dots.on('click', (ev, d) => {
-            ev.stopPropagation();
-            showPopover({
-                type: 'event', label: d.result, event_type: d.type,
-                data: { result: d.result, process: d.process, ts: d.ts },
-            }, ev, null);
-        });
-    });
-
-    // X axis
-    svg.append('g')
-        .attr('transform', `translate(0,${H - margin.bottom})`)
-        .call(d3.axisBottom(x).ticks(8).tickSize(0).tickPadding(10))
-        .call(g => g.select('.domain').attr('stroke', '#1a2332'))
-        .selectAll('text').attr('fill', '#364152').attr('font-size', '10px');
 }
 
 // ============================================================

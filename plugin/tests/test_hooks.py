@@ -70,11 +70,9 @@ class TestPostToolUseHook:
         assert not tmp_state_file.exists()
 
     def test_empty_stdin_no_crash(self, plugin_env, tmp_state_file):
-        """Empty stdin → exits with error (json.loads fails on empty string)."""
+        """Empty stdin → graceful exit, no crash."""
         result = run_hook("on_post_tool_use.py", plugin_env, "")
-        # json.loads("") raises JSONDecodeError, so hook exits with error
-        assert result.returncode != 0
-        assert "JSONDecodeError" in result.stderr
+        assert result.returncode == 0
 
     def test_no_repo_id_no_crash(self, plugin_env, tmp_state_file):
         """Missing OVERMIND_REPO_ID → graceful exit."""
