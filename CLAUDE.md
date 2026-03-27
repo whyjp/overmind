@@ -70,7 +70,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - ~~SQLite store 이관~~ ✅
 - ~~피드백 점수 (prevented_error, helpful/irrelevant) 축적~~ ✅ (feedback API + MCP tool + PreToolUse 자동)
 - PostToolUse lesson 필드 활용: 메모리/레슨 처리 플러그인 연동 시 자동 타입 분류
-- **Push "why" 보강**: 현재 result가 "Modified config.toml"(what only)로 수신측 행동 변화 유도 불충분 (A/B 10회 병렬 테스트로 확인). git diff snippet + Bash 에러 context를 result에 포함하여 "왜 수정했는지"를 LLM 없이 전달. SummaryGenerator mock 상태에서는 원본 유지 (no-op). 상세: `docs/superpowers/specs/2026-03-27-post-tool-push-and-test-reinforcement-design.md` §7
+- ~~**Push "why" 보강**~~ ✅ git diff snippet + Bash 에러 context를 result에 포함 (diff_collector + PostToolUse context capture)
 
 **Phase 2-B: 클라이언트 레슨 반영 (수신 측 영향력)**
 - ~~`.claude/overmind-context.md` 동기화: 훅이 관리하는 전용 파일, TTL 기반 만료~~ ✅
