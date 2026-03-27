@@ -13,6 +13,8 @@ build/
 .coverage
 htmlcov/
 .mypy_cache/
+server/tests/scenarios/*.log
+server/tests/scenarios/parallel_results/
 
 # IDE
 .vscode/

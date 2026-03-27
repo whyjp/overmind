@@ -46,7 +46,7 @@ import uvicorn
 from overmind.api import create_app
 
 PLUGIN_DIR = Path(__file__).resolve().parents[3] / "plugin"
-OVERMIND_PORT = 17995
+OVERMIND_PORT = int(os.environ.get("TEST_OVERMIND_PORT", "17995"))
 REPO_ID = "github.com/test/hive-complex"
 
 # Model selection: AGENT_MODEL=haiku|sonnet|opus
