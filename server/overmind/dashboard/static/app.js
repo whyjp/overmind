@@ -20,14 +20,26 @@ function getActiveTab() {
     return active ? active.dataset.tab : 'overview';
 }
 
-function refreshActiveTab() {
+async function refreshActiveTab() {
+    // Refresh repo list first — may discover new repos
+    await refreshRepoList();
+
     if (!currentRepo) return;
-    const tab = getActiveTab();
-    if (tab === 'overview') loadOverview();
-    else if (tab === 'graph') { loadGraphData(); loadFlowData(); }
-    else if (tab === 'timeline') loadTimelineData();
-    // Also refresh repo list to pick up new repos
-    refreshRepoList();
+
+    // Visual feedback: spin the refresh button
+    const btn = document.getElementById('refresh-btn');
+    if (btn) btn.classList.add('spinning');
+
+    try {
+        const tab = getActiveTab();
+        if (tab === 'overview') await loadOverview();
+        else if (tab === 'graph') { await loadGraphData(); await loadFlowData(); }
+        else if (tab === 'timeline') await loadTimelineData();
+    } catch (e) {
+        console.warn('Refresh failed:', e);
+    }
+
+    if (btn) setTimeout(() => btn.classList.remove('spinning'), 300);
 }
 
 async function refreshRepoList() {
@@ -37,14 +49,25 @@ async function refreshRepoList() {
         const sel = document.getElementById('repo-id');
         const current = sel.value;
         const existing = new Set([...sel.options].map(o => o.value));
+        let newRepos = [];
         repos.forEach(r => {
             if (!existing.has(r)) {
                 const o = document.createElement('option');
                 o.value = r; o.textContent = r;
                 sel.appendChild(o);
+                newRepos.push(r);
             }
         });
-        if (!current && repos.length === 1) { sel.value = repos[0]; loadAll(); }
+        // Auto-select: if no repo selected, pick first available
+        if (!current && repos.length > 0) {
+            sel.value = repos[0];
+            loadAll();
+        }
+        // If a new repo appeared and nothing was selected, switch to it
+        else if (newRepos.length > 0 && !current) {
+            sel.value = newRepos[0];
+            loadAll();
+        }
     } catch (e) { /* server may be restarting */ }
 }
 

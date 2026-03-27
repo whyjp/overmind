@@ -188,7 +188,7 @@ header {
     border-color: rgba(0, 229, 160, 0.15);
 }
 .refresh-btn svg { transition: transform 0.3s; }
-.refresh-btn:active svg { transform: rotate(360deg); }
+.refresh-btn:active svg, .refresh-btn.spinning svg { transform: rotate(360deg); }
 
 @keyframes spin {
     from { transform: rotate(0deg); }
