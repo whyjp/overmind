@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Overmind JSONL store cleanup utility.
+"""Overmind SQLite store management utility.
 
 Usage:
-    python scripts/db_cleanup.py status                     # Show store stats
-    python scripts/db_cleanup.py ttl [--days 14]            # Remove events older than N days
-    python scripts/db_cleanup.py purge-repo <repo_id>       # Delete all data for a repo
+    python scripts/db_cleanup.py status                      # Show store stats
+    python scripts/db_cleanup.py ttl [--days 14]             # Remove events older than N days
+    python scripts/db_cleanup.py purge-repo <repo_id>        # Delete all data for a repo
     python scripts/db_cleanup.py purge-user <repo_id> <user> # Delete all events by a user in a repo
-    python scripts/db_cleanup.py purge-all                  # Wipe entire data directory
-    python scripts/db_cleanup.py compact                    # Remove empty files and rebuild
+    python scripts/db_cleanup.py purge-all                   # Delete database file
+    python scripts/db_cleanup.py vacuum                      # Reclaim disk space
     python scripts/db_cleanup.py export <repo_id> [--out FILE] # Export repo events as JSONL
 """
 
@@ -15,240 +15,192 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
+import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "overmind.db"
 
 
-def _safe_repo_id(repo_id: str) -> str:
-    return repo_id.replace("/", "_").replace(":", "_")
+def _get_db_path(args: argparse.Namespace) -> Path:
+    return Path(args.db) if args.db else DEFAULT_DB
 
 
-def _repo_dir(repo_id: str) -> Path:
-    return DATA_DIR / "repos" / _safe_repo_id(repo_id)
-
-
-def _parse_ts(ts: str) -> datetime:
-    return datetime.fromisoformat(ts)
-
-
-def _iter_jsonl_files(base: Path):
-    """Yield all .jsonl files under base."""
-    if not base.exists():
-        return
-    yield from base.rglob("*.jsonl")
-
-
-def _read_events(jsonl_file: Path) -> list[dict]:
-    events = []
-    for line in jsonl_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return events
-
-
-def _write_events(jsonl_file: Path, events: list[dict]) -> None:
-    if not events:
-        jsonl_file.unlink(missing_ok=True)
-        return
-    jsonl_file.write_text(
-        "\n".join(json.dumps(e, ensure_ascii=False) for e in events) + "\n",
-        encoding="utf-8",
-    )
-
-
-# ── Commands ──────────────────────────────────────────────────────────
+def _connect(db_path: Path) -> sqlite3.Connection:
+    if not db_path.exists():
+        print(f"Database not found: {db_path}")
+        sys.exit(1)
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    repos_dir = DATA_DIR / "repos"
-    if not repos_dir.exists():
-        print("No data found.")
+    db_path = _get_db_path(args)
+    if not db_path.exists():
+        print("No database found.")
         return
 
+    conn = _connect(db_path)
+    print(f"Database: {db_path} ({db_path.stat().st_size / 1024:.1f} KB)\n")
+
+    cursor = conn.execute(
+        """SELECT repo_id, COUNT(*) as cnt, COUNT(DISTINCT user) as users,
+                  MIN(ts) as oldest, MAX(ts) as newest
+           FROM events GROUP BY repo_id ORDER BY repo_id"""
+    )
     total_events = 0
-    total_files = 0
-    total_bytes = 0
-
-    for repo_dir in sorted(repos_dir.iterdir()):
-        if not repo_dir.is_dir():
-            continue
-        repo_events = 0
-        repo_bytes = 0
-        repo_files = 0
-        users = set()
-        oldest_ts = None
-        newest_ts = None
-
-        for f in _iter_jsonl_files(repo_dir / "events"):
-            repo_files += 1
-            repo_bytes += f.stat().st_size
-            # extract user from path: events/{user}/YYYY-MM-DD.jsonl
-            users.add(f.parent.name)
-            for evt in _read_events(f):
-                repo_events += 1
-                ts = evt.get("ts", "")
-                if ts:
-                    if oldest_ts is None or ts < oldest_ts:
-                        oldest_ts = ts
-                    if newest_ts is None or ts > newest_ts:
-                        newest_ts = ts
-
-        total_events += repo_events
-        total_files += repo_files
-        total_bytes += repo_bytes
-
-        print(f"  repo: {repo_dir.name}")
-        print(f"    events: {repo_events}  files: {repo_files}  size: {repo_bytes / 1024:.1f} KB")
-        print(f"    users: {', '.join(sorted(users)) or '(none)'}")
-        if oldest_ts:
-            print(f"    range: {oldest_ts[:19]} ~ {newest_ts[:19]}")
+    for row in cursor:
+        cnt = row["cnt"]
+        total_events += cnt
+        print(f"  repo: {row['repo_id']}")
+        print(f"    events: {cnt}  users: {row['users']}")
+        if row["oldest"]:
+            print(f"    range: {row['oldest'][:19]} ~ {row['newest'][:19]}")
         print()
 
-    print(f"Total: {total_events} events, {total_files} files, {total_bytes / 1024:.1f} KB")
+    pull_count = conn.execute("SELECT COUNT(*) FROM pull_log").fetchone()[0]
+    print(f"Total: {total_events} events, {pull_count} pull log entries")
+    conn.close()
 
 
 def cmd_ttl(args: argparse.Namespace) -> None:
-    days = args.days
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    removed = 0
-    kept = 0
+    db_path = _get_db_path(args)
+    conn = _connect(db_path)
 
-    repos_dir = DATA_DIR / "repos"
-    if not repos_dir.exists():
-        print("No data found.")
-        return
+    cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
+    cutoff_iso = cutoff.isoformat()
 
-    for f in _iter_jsonl_files(repos_dir):
-        events = _read_events(f)
-        before = len(events)
-        events = [e for e in events if _parse_ts(e["ts"]) >= cutoff]
-        after = len(events)
-        removed += before - after
-        kept += after
-        _write_events(f, events)
+    count_before = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    conn.execute("DELETE FROM events WHERE ts < ?", (cutoff_iso,))
+    conn.commit()
+    count_after = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
-    print(f"TTL cleanup (>{days} days): removed {removed}, kept {kept}")
+    removed = count_before - count_after
+    print(f"TTL cleanup (>{args.days} days): removed {removed}, kept {count_after}")
+    conn.close()
 
 
 def cmd_purge_repo(args: argparse.Namespace) -> None:
-    repo_id = args.repo_id
-    rd = _repo_dir(repo_id)
-    if not rd.exists():
-        print(f"Repo not found: {repo_id}")
+    db_path = _get_db_path(args)
+    conn = _connect(db_path)
+
+    count = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE repo_id = ?", (args.repo_id,)
+    ).fetchone()[0]
+
+    if count == 0:
+        print(f"Repo not found: {args.repo_id}")
+        conn.close()
         return
 
-    # count before delete
-    count = sum(len(_read_events(f)) for f in _iter_jsonl_files(rd / "events"))
-    shutil.rmtree(rd)
-    print(f"Purged repo '{repo_id}': {count} events deleted")
+    conn.execute("DELETE FROM events WHERE repo_id = ?", (args.repo_id,))
+    conn.execute("DELETE FROM pull_log WHERE repo_id = ?", (args.repo_id,))
+    conn.commit()
+    print(f"Purged repo '{args.repo_id}': {count} events deleted")
+    conn.close()
 
 
 def cmd_purge_user(args: argparse.Namespace) -> None:
-    repo_id = args.repo_id
-    user = args.user
-    user_dir = _repo_dir(repo_id) / "events" / user
-    if not user_dir.exists():
-        print(f"User '{user}' not found in repo '{repo_id}'")
+    db_path = _get_db_path(args)
+    conn = _connect(db_path)
+
+    count = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE repo_id = ? AND user = ?",
+        (args.repo_id, args.user),
+    ).fetchone()[0]
+
+    if count == 0:
+        print(f"User '{args.user}' not found in repo '{args.repo_id}'")
+        conn.close()
         return
 
-    count = sum(len(_read_events(f)) for f in _iter_jsonl_files(user_dir))
-    shutil.rmtree(user_dir)
-    print(f"Purged user '{user}' from repo '{repo_id}': {count} events deleted")
+    conn.execute(
+        "DELETE FROM events WHERE repo_id = ? AND user = ?",
+        (args.repo_id, args.user),
+    )
+    conn.commit()
+    print(f"Purged user '{args.user}' from repo '{args.repo_id}': {count} events deleted")
+    conn.close()
 
 
 def cmd_purge_all(args: argparse.Namespace) -> None:
+    db_path = _get_db_path(args)
+    if not db_path.exists():
+        print("No database found.")
+        return
+
     if not args.yes:
-        confirm = input("This will delete ALL Overmind data. Type 'yes' to confirm: ")
+        confirm = input("This will delete the entire Overmind database. Type 'yes' to confirm: ")
         if confirm.strip().lower() != "yes":
             print("Aborted.")
             return
 
-    if DATA_DIR.exists():
-        shutil.rmtree(DATA_DIR)
-        DATA_DIR.mkdir(parents=True)
-        print("All data purged.")
-    else:
-        print("No data found.")
+    db_path.unlink()
+    print("Database deleted.")
 
 
-def cmd_compact(args: argparse.Namespace) -> None:
-    repos_dir = DATA_DIR / "repos"
-    if not repos_dir.exists():
-        print("No data found.")
-        return
+def cmd_vacuum(args: argparse.Namespace) -> None:
+    db_path = _get_db_path(args)
+    conn = _connect(db_path)
 
-    removed_files = 0
-    removed_dirs = 0
-    deduped = 0
+    size_before = db_path.stat().st_size
+    conn.execute("VACUUM")
+    conn.close()
+    size_after = db_path.stat().st_size
 
-    for f in list(_iter_jsonl_files(repos_dir)):
-        events = _read_events(f)
-        if not events:
-            f.unlink()
-            removed_files += 1
-            continue
-
-        # deduplicate by id
-        seen = set()
-        unique = []
-        for e in events:
-            eid = e.get("id", "")
-            if eid not in seen:
-                seen.add(eid)
-                unique.append(e)
-            else:
-                deduped += 1
-        _write_events(f, unique)
-
-    # remove empty directories
-    for d in sorted(repos_dir.rglob("*"), reverse=True):
-        if d.is_dir() and not any(d.iterdir()):
-            d.rmdir()
-            removed_dirs += 1
-
-    print(f"Compact: removed {removed_files} empty files, {removed_dirs} empty dirs, deduped {deduped} events")
+    saved = size_before - size_after
+    print(f"Vacuum complete: {size_before / 1024:.1f} KB → {size_after / 1024:.1f} KB (saved {saved / 1024:.1f} KB)")
 
 
 def cmd_export(args: argparse.Namespace) -> None:
-    repo_id = args.repo_id
-    rd = _repo_dir(repo_id)
-    if not rd.exists():
-        print(f"Repo not found: {repo_id}", file=sys.stderr)
+    db_path = _get_db_path(args)
+    conn = _connect(db_path)
+
+    cursor = conn.execute(
+        "SELECT * FROM events WHERE repo_id = ? ORDER BY ts",
+        (args.repo_id,),
+    )
+    rows = cursor.fetchall()
+
+    if not rows:
+        print(f"Repo not found: {args.repo_id}", file=sys.stderr)
+        conn.close()
         sys.exit(1)
-
-    events = []
-    for f in _iter_jsonl_files(rd / "events"):
-        events.extend(_read_events(f))
-
-    events.sort(key=lambda e: e.get("ts", ""))
 
     out = sys.stdout
     if args.out:
         out = open(args.out, "w", encoding="utf-8")
 
-    for e in events:
-        out.write(json.dumps(e, ensure_ascii=False) + "\n")
+    for row in rows:
+        event = {
+            "id": row["id"],
+            "repo_id": row["repo_id"],
+            "user": row["user"],
+            "ts": row["ts"],
+            "type": row["type"],
+            "result": row["result"],
+            "prompt": row["prompt"],
+            "files": json.loads(row["files"]) if row["files"] else [],
+            "process": json.loads(row["process"]) if row["process"] else [],
+            "priority": row["priority"],
+            "scope": row["scope"],
+        }
+        out.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     if args.out:
         out.close()
-        print(f"Exported {len(events)} events to {args.out}", file=sys.stderr)
+        print(f"Exported {len(rows)} events to {args.out}", file=sys.stderr)
     else:
-        print(f"# {len(events)} events exported", file=sys.stderr)
+        print(f"# {len(rows)} events exported", file=sys.stderr)
 
-
-# ── CLI ───────────────────────────────────────────────────────────────
+    conn.close()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Overmind JSONL store cleanup utility")
+    parser = argparse.ArgumentParser(description="Overmind SQLite store management utility")
+    parser.add_argument("--db", help=f"Database path (default: {DEFAULT_DB})")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("status", help="Show store stats")
@@ -263,10 +215,10 @@ def main() -> None:
     p_user.add_argument("repo_id")
     p_user.add_argument("user")
 
-    p_all = sub.add_parser("purge-all", help="Wipe entire data directory")
+    p_all = sub.add_parser("purge-all", help="Delete database file")
     p_all.add_argument("--yes", action="store_true", help="Skip confirmation")
 
-    sub.add_parser("compact", help="Remove empty files, deduplicate events")
+    sub.add_parser("vacuum", help="Reclaim disk space (SQLite VACUUM)")
 
     p_export = sub.add_parser("export", help="Export repo events as JSONL")
     p_export.add_argument("repo_id")
@@ -284,7 +236,7 @@ def main() -> None:
         "purge-repo": cmd_purge_repo,
         "purge-user": cmd_purge_user,
         "purge-all": cmd_purge_all,
-        "compact": cmd_compact,
+        "vacuum": cmd_vacuum,
         "export": cmd_export,
     }
     commands[args.command](args)
