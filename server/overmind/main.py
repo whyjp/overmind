@@ -12,6 +12,14 @@ from overmind.mcp_server import create_mcp_server
 from overmind.store import MemoryStore
 
 
+def create_standalone_app():
+    """Factory for uvicorn --factory. Reads OVERMIND_DATA_DIR env var."""
+    import os
+    data_dir = Path(os.environ.get("OVERMIND_DATA_DIR", "data"))
+    store = MemoryStore(data_dir=data_dir)
+    return create_app(data_dir=data_dir, store=store)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overmind Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
