@@ -256,7 +256,7 @@ function renderTypeChart(byType) {
             .attr('x', barW / 2).attr('y', 14)
             .attr('text-anchor', 'middle')
             .attr('fill', C[type] || '#8b949e')
-            .attr('font-size', '10px').attr('font-weight', '500')
+            .attr('font-size', '18px').attr('font-weight', '500')
             .text(`${type} (${count})`);
         x += barW + 8;
     });
@@ -546,7 +546,7 @@ function renderFlowView(data) {
             .attr('fill', i % 2 ? 'rgba(17,24,34,0.25)' : 'transparent');
         g.append('text')
             .attr('x', 12).attr('y', yScale(agent) + yScale.bandwidth() / 2 + 4)
-            .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
+            .attr('fill', C.user).attr('font-size', '18px').attr('font-weight', '600')
             .text(agent);
     });
 
@@ -576,7 +576,7 @@ function renderFlowView(data) {
             axisG.append('text')
                 .attr('x', gx).attr('y', 14)
                 .attr('text-anchor', 'middle')
-                .attr('fill', '#364152').attr('font-size', '9px')
+                .attr('fill', '#364152').attr('font-size', '16px')
                 .text(`#${i + 1}`);
         });
     } else {
@@ -594,7 +594,7 @@ function renderFlowView(data) {
         axisG.call(d3.axisBottom(zoomedX).ticks(8).tickSize(0).tickPadding(8));
     }
     axisG.select('.domain').attr('stroke', '#1a2332');
-    axisG.selectAll('text').attr('fill', '#364152').attr('font-size', '10px');
+    axisG.selectAll('text').attr('fill', '#364152').attr('font-size', '18px');
 
     // Event positions
     const evtPos = {};
@@ -784,7 +784,7 @@ function renderFlowView(data) {
     evtGroups.filter(d => pullCountMap[d.id]?.size).append('text')
         .attr('x', 0).attr('y', -dotR - 6)
         .attr('text-anchor', 'middle')
-        .attr('fill', C.accent).attr('font-size', '8px').attr('font-weight', '700')
+        .attr('fill', C.accent).attr('font-size', '14px').attr('font-weight', '700')
         .text(d => pullCountMap[d.id].size + '\u2193');
 
     // --- Interactions ---
@@ -852,11 +852,11 @@ function renderFlowView(data) {
             const pos = evtPos[lastPushEvt.id];
             if (pos) {
                 const label = `PUSH \u25B2 ${agent}`;
-                const labelW = label.length * 5.5 + 12;
+                const labelW = label.length * 9 + 16;
                 const labelG = g.append('g')
                     .attr('transform', `translate(${pos.x - labelW / 2},${pos.y - dotR - 18})`);
                 labelG.append('rect')
-                    .attr('x', 0).attr('y', -9).attr('width', labelW).attr('height', 18)
+                    .attr('x', 0).attr('y', -12).attr('width', labelW).attr('height', 24)
                     .attr('rx', 3)
                     .attr('fill', (C[lastPushEvt.type] || C.change) + '15')
                     .attr('stroke', (C[lastPushEvt.type] || C.change) + '35')
@@ -864,18 +864,18 @@ function renderFlowView(data) {
                 labelG.append('text')
                     .attr('x', 5).attr('y', 3)
                     .attr('fill', C[lastPushEvt.type] || C.change)
-                    .attr('font-size', '8px').attr('font-weight', '600')
+                    .attr('font-size', '14px').attr('font-weight', '600')
                     .attr('letter-spacing', '0.3px')
                     .text(label);
             }
         } else if (pullIsLast && lastPullLink) {
             const gx = evtPos[lastPullLink.event_id] ? evtPos[lastPullLink.event_id].x : 0;
             const label = `${lastPullLink.event_user} \u25BC PULL \u2192 ${agent}`;
-            const labelW = label.length * 5.5 + 12;
+            const labelW = label.length * 9 + 16;
             const labelG = g.append('g')
                 .attr('transform', `translate(${gx - labelW / 2 + dotR},${laneY + dotR + 6})`);
             labelG.append('rect')
-                .attr('x', 0).attr('y', -9).attr('width', labelW).attr('height', 18)
+                .attr('x', 0).attr('y', -12).attr('width', labelW).attr('height', 24)
                 .attr('rx', 3)
                 .attr('fill', 'rgba(0,229,160,0.08)')
                 .attr('stroke', 'rgba(0,229,160,0.20)')
@@ -883,7 +883,7 @@ function renderFlowView(data) {
             labelG.append('text')
                 .attr('x', 5).attr('y', 3)
                 .attr('fill', C.accent)
-                .attr('font-size', '8px').attr('font-weight', '600')
+                .attr('font-size', '14px').attr('font-weight', '600')
                 .attr('letter-spacing', '0.3px')
                 .text(label);
         }
@@ -905,7 +905,7 @@ function renderFlowView(data) {
                 .attr('y', laneY - 8 + i * 12)
                 .attr('text-anchor', 'start')
                 .attr('fill', line.color)
-                .attr('font-size', '9px')
+                .attr('font-size', '16px')
                 .attr('font-weight', '500')
                 .text(line.text);
         });
@@ -921,19 +921,19 @@ function renderFlowView(data) {
     typeItems.forEach((it, i) => {
         const x = i * 90;
         lg.append('circle').attr('cx', x + 4).attr('cy', 0).attr('r', 4).attr('fill', it.c);
-        lg.append('text').attr('x', x + 14).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text(it.l);
+        lg.append('text').attr('x', x + 14).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '18px').text(it.l);
     });
     const elX = typeItems.length * 90 + 16;
     // Sequence edge
     lg.append('line').attr('x1', elX).attr('y1', 0).attr('x2', elX + 28).attr('y2', 0)
         .attr('stroke', 'rgba(200,214,229,0.3)').attr('stroke-width', 1.2);
-    lg.append('text').attr('x', elX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text('sequence');
+    lg.append('text').attr('x', elX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '18px').text('sequence');
     // Pull edge
     const plX = elX + 100;
     lg.append('line').attr('x1', plX).attr('y1', 0).attr('x2', plX + 28).attr('y2', 0)
         .attr('stroke', 'rgba(0,229,160,0.5)').attr('stroke-width', 1.3).attr('stroke-dasharray', '5,3');
-    lg.append('text').attr('x', plX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text('pull flow');
-    lg.append('text').attr('x', elX + 130).attr('y', 3).attr('fill', C.accent).attr('font-size', '10px').text('N\u2193 = pull count');
+    lg.append('text').attr('x', plX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '18px').text('pull flow');
+    lg.append('text').attr('x', elX + 130).attr('y', 3).attr('fill', C.accent).attr('font-size', '18px').text('N\u2193 = pull count');
 }
 
 function renderGraphAgentView(data) {
@@ -1021,7 +1021,7 @@ function renderGraphAgentView(data) {
     headers.forEach(h => {
         g.append('text').attr('x', h.x).attr('y', 32)
             .attr('text-anchor', 'middle').attr('fill', h.color)
-            .attr('font-size', '10px').attr('font-weight', '600')
+            .attr('font-size', '18px').attr('font-weight', '600')
             .attr('letter-spacing', '2px').attr('opacity', 0.5)
             .text(h.label);
     });
@@ -1087,7 +1087,7 @@ function renderGraphAgentView(data) {
         .attr('stroke', 'rgba(56,189,248,0.4)').attr('stroke-width', 1.5);
     uG.append('circle').attr('r', 4).attr('fill', C.user);
     uG.append('text').attr('dy', 38).attr('text-anchor', 'middle')
-        .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
+        .attr('fill', C.user).attr('font-size', '18px').attr('font-weight', '600')
         .text(d => (d.label || d.id).replace('user:', ''));
 
     // --- Event nodes ---
@@ -1119,12 +1119,12 @@ function renderGraphAgentView(data) {
     // Type badge
     eG.append('rect')
         .attr('x', -eW / 2 + 8).attr('y', -eH / 2 + 6)
-        .attr('width', d => (d.event_type || 'evt').length * 6 + 12).attr('height', 15)
+        .attr('width', d => (d.event_type || 'evt').length * 10 + 16).attr('height', 22)
         .attr('rx', 4)
         .attr('fill', d => C[d.event_type] || C.change);
     eG.append('text')
         .attr('x', -eW / 2 + 14).attr('y', -eH / 2 + 16)
-        .attr('fill', '#06080c').attr('font-size', '8px').attr('font-weight', '700')
+        .attr('fill', '#06080c').attr('font-size', '14px').attr('font-weight', '700')
         .attr('letter-spacing', '0.5px')
         .text(d => (d.event_type || 'event').toUpperCase());
 
@@ -1132,13 +1132,13 @@ function renderGraphAgentView(data) {
     eG.filter(d => isGhost(d)).append('rect')
         .attr('x', d => -eW / 2 + 8 + (d.event_type || 'evt').length * 6 + 16)
         .attr('y', -eH / 2 + 6)
-        .attr('width', 42).attr('height', 15)
+        .attr('width', 60).attr('height', 22)
         .attr('rx', 4)
         .attr('fill', 'rgba(0,229,160,0.2)');
     eG.filter(d => isGhost(d)).append('text')
         .attr('x', d => -eW / 2 + 14 + (d.event_type || 'evt').length * 6 + 16)
         .attr('y', -eH / 2 + 16)
-        .attr('fill', C.accent).attr('font-size', '8px').attr('font-weight', '600')
+        .attr('fill', C.accent).attr('font-size', '14px').attr('font-weight', '600')
         .attr('letter-spacing', '0.5px')
         .text('PULLED');
 
@@ -1147,14 +1147,14 @@ function renderGraphAgentView(data) {
         .attr('x', eW / 2 - 8).attr('y', -eH / 2 + 16)
         .attr('text-anchor', 'end')
         .attr('fill', 'rgba(0,229,160,0.6)')
-        .attr('font-size', '9px')
+        .attr('font-size', '16px')
         .text(d => `\u2190 ${d.data.original_user}`);
 
     // Result text (middle row)
     eG.append('text')
         .attr('x', -eW / 2 + 10).attr('y', 4)
         .attr('fill', d => isGhost(d) ? '#6a7a8e' : '#dce6f0')
-        .attr('font-size', '11px')
+        .attr('font-size', '18px')
         .text(d => {
             const t = d.label || d.id;
             return t.length > 32 ? t.substring(0, 32) + '...' : t;
@@ -1181,7 +1181,7 @@ function renderGraphAgentView(data) {
         el.append('text')
             .attr('x', -eW / 2 + 10).attr('y', eH / 2 - 6)
             .attr('fill', isPoly ? C.correction : '#4a5568')
-            .attr('font-size', '9px')
+            .attr('font-size', '16px')
             .attr('font-weight', isPoly ? '600' : '400')
             .text((isPoly ? '\u26A0 ' : '\u2192 ') + tag);
     });
@@ -1318,7 +1318,7 @@ function renderGraphScopeView(data) {
     // Column headers
     g.append('text').attr('x', centerX).attr('y', 28)
         .attr('text-anchor', 'middle').attr('fill', C.scope)
-        .attr('font-size', '10px').attr('font-weight', '600')
+        .attr('font-size', '18px').attr('font-weight', '600')
         .attr('letter-spacing', '2px').attr('opacity', 0.5)
         .text('SCOPES');
 
@@ -1368,7 +1368,7 @@ function renderGraphScopeView(data) {
         .attr('stroke', 'rgba(56,189,248,0.3)').attr('stroke-width', 1.5);
     uG.append('circle').attr('r', 4).attr('fill', C.user);
     uG.append('text').attr('dy', 38).attr('text-anchor', 'middle')
-        .attr('fill', C.user).attr('font-size', '11px').attr('font-weight', '600')
+        .attr('fill', C.user).attr('font-size', '18px').attr('font-weight', '600')
         .text(d => (d.label || d.id).replace('user:', ''));
 
     // --- Scope nodes ---
@@ -1388,7 +1388,7 @@ function renderGraphScopeView(data) {
     sG.append('text').attr('text-anchor', 'middle').attr('dy', 4)
         .attr('fill', d => polyScopes.has(d.id) || polyScopes.has((d.label || '').replace('scope:', ''))
             ? C.correction : '#8b949e')
-        .attr('font-size', '9px').attr('font-weight', '500')
+        .attr('font-size', '16px').attr('font-weight', '500')
         .text(d => {
             const l = (d.label || d.id).replace('scope:', '');
             return l.length > 16 ? l.substring(0, 16) + '..' : l;
@@ -1396,7 +1396,7 @@ function renderGraphScopeView(data) {
 
     // Event count badge
     sG.append('text').attr('text-anchor', 'middle').attr('dy', -sR - 8)
-        .attr('fill', '#5a6a7e').attr('font-size', '9px')
+        .attr('fill', '#5a6a7e').attr('font-size', '16px')
         .text(d => {
             const count = (scopeToEvents[d.id] || new Set()).size;
             return count + ' event' + (count !== 1 ? 's' : '');
@@ -1424,17 +1424,17 @@ function renderGraphLegend(svg, H) {
         const x = i * 96;
         lg.append('circle').attr('cx', x + 5).attr('cy', 0).attr('r', 4).attr('fill', it.c);
         lg.append('text').attr('x', x + 14).attr('y', 4)
-            .attr('fill', '#364152').attr('font-size', '10px').text(it.l);
+            .attr('fill', '#364152').attr('font-size', '18px').text(it.l);
     });
     const elX = items.length * 96 + 20;
     lg.append('line').attr('x1', elX).attr('y1', 0).attr('x2', elX + 20).attr('y2', 0)
         .attr('stroke', 'rgba(56,189,248,0.4)').attr('stroke-width', 1.5);
     lg.append('text').attr('x', elX + 26).attr('y', 4)
-        .attr('fill', '#364152').attr('font-size', '10px').text('pushed');
+        .attr('fill', '#364152').attr('font-size', '18px').text('pushed');
     lg.append('line').attr('x1', elX + 90).attr('y1', 0).attr('x2', elX + 110).attr('y2', 0)
         .attr('stroke', 'rgba(0,229,160,0.5)').attr('stroke-width', 1.5).attr('stroke-dasharray', '6,4');
     lg.append('text').attr('x', elX + 116).attr('y', 4)
-        .attr('fill', '#364152').attr('font-size', '10px').text('pulled (consumed)');
+        .attr('fill', '#364152').attr('font-size', '18px').text('pulled (consumed)');
 }
 
 // ============================================================
