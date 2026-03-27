@@ -1,19 +1,24 @@
 """Scenario: two users work on same scope with different intents."""
 
 import pytest
+import pytest_asyncio
 from overmind.models import MemoryEvent
-from overmind.store import MemoryStore
+from overmind.store import SQLiteStore
 
 
-@pytest.fixture
-def store(data_dir):
-    return MemoryStore(data_dir=data_dir)
+@pytest_asyncio.fixture
+async def store(data_dir):
+    s = SQLiteStore(data_dir=data_dir)
+    await s.init_db()
+    yield s
+    await s.close()
 
 
 REPO = "github.com/test/project"
 
 
-def test_polymorphism_detection_scenario(store):
+@pytest.mark.asyncio
+async def test_polymorphism_detection_scenario(store):
     # 1. dev_a works on auth from security perspective
     evt_a = MemoryEvent(
         id="evt_poly_001",
@@ -38,17 +43,17 @@ def test_polymorphism_detection_scenario(store):
         process=["인증 요청 지연 측정→평균 200ms", "Redis 세션 캐시 도입 검토", "세션 캐시 레이어 추가"],
     )
 
-    store.push([evt_a, evt_b])
+    await store.push([evt_a, evt_b])
 
     # 3. dev_c pulls auth scope — should see both intents
-    result = store.pull(repo_id=REPO, scope="src/auth/*", exclude_user="dev_c")
+    result = await store.pull(repo_id=REPO, scope="src/auth/*", exclude_user="dev_c")
     assert result.count == 2
 
     users = set(e.user for e in result.events)
     assert users == {"dev_a", "dev_b"}
 
     # 4. Graph data should detect polymorphism
-    graph = store.get_graph_data(REPO)
+    graph = await store.get_graph_data(REPO)
     assert len(graph.polymorphisms) >= 1
 
     poly = graph.polymorphisms[0]

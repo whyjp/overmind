@@ -1,19 +1,24 @@
 """Scenario: dev_a discovers .env issue, dev_b pulls and gets pre-warned."""
 
 import pytest
+import pytest_asyncio
 from overmind.models import MemoryEvent
-from overmind.store import MemoryStore
+from overmind.store import SQLiteStore
 
 
-@pytest.fixture
-def store(data_dir):
-    return MemoryStore(data_dir=data_dir)
+@pytest_asyncio.fixture
+async def store(data_dir):
+    s = SQLiteStore(data_dir=data_dir)
+    await s.init_db()
+    yield s
+    await s.close()
 
 
 REPO = "github.com/test/project"
 
 
-def test_preemptive_block_scenario(store):
+@pytest.mark.asyncio
+async def test_preemptive_block_scenario(store):
     # 1. dev_a encounters and solves .env issue
     evt = MemoryEvent(
         id="evt_preempt_001",
@@ -30,11 +35,11 @@ def test_preemptive_block_scenario(store):
             ".env에 SERVICE_A_INTERNAL_URL=http://localhost:3001 추가로 해결",
         ],
     )
-    accepted, _ = store.push([evt])
+    accepted, _ = await store.push([evt])
     assert accepted == 1
 
     # 2. dev_b starts working on service B area — pulls related scope
-    result = store.pull(repo_id=REPO, scope="src/config/*", exclude_user="dev_b")
+    result = await store.pull(repo_id=REPO, scope="src/config/*", exclude_user="dev_b")
     assert result.count >= 1
 
     # 3. Verify the lesson is present and actionable

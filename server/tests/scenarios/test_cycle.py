@@ -15,21 +15,21 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from overmind.api import create_app
+from overmind.store import SQLiteStore
 
 
 REPO = "github.com/cycle/test"
 
 
-@pytest.fixture
-def app(data_dir):
-    return create_app(data_dir=data_dir)
-
-
 @pytest_asyncio.fixture
-async def client(app):
+async def client(data_dir):
+    store = SQLiteStore(data_dir=data_dir)
+    await store.init_db()
+    app = create_app(data_dir=data_dir, store=store)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+    await store.close()
 
 
 @pytest.mark.asyncio
