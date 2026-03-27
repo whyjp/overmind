@@ -782,8 +782,8 @@ function renderFlowView(data) {
             });
     });
 
-    // --- Agent HEAD labels: last push (left of node) & last pull (right of node) ---
-    // Collect last pull (ghost) per agent: latest pull_link timestamp per puller
+    // --- Agent HEAD label: single label on rightmost visual position per agent ---
+    // Determine each agent's last action (push or pull) and rightmost X position
     const lastPullPerAgent = {};
     pullLinks.forEach(link => {
         const prev = lastPullPerAgent[link.puller];
@@ -796,43 +796,56 @@ function renderFlowView(data) {
         const agentEvts = agentEvents[agent] || [];
         const laneY = yScale(agent) + yScale.bandwidth() / 2;
 
-        // Last PUSH: label at TOP-LEFT of the node
+        // Find rightmost push position + timestamp
+        let lastPushX = -Infinity, lastPushTs = '';
+        let lastPushEvt = null;
         if (agentEvts.length > 0) {
-            const lastPush = agentEvts[agentEvts.length - 1];
-            const pos = evtPos[lastPush.id];
+            lastPushEvt = agentEvts[agentEvts.length - 1];
+            const pos = evtPos[lastPushEvt.id];
+            if (pos) { lastPushX = pos.x; lastPushTs = lastPushEvt.ts; }
+        }
+
+        // Find rightmost ghost (pull) position + timestamp
+        let lastPullX = -Infinity, lastPullTs = '';
+        let lastPullLink = lastPullPerAgent[agent];
+        if (lastPullLink && evtPos[lastPullLink.event_id]) {
+            lastPullX = evtPos[lastPullLink.event_id].x;
+            lastPullTs = lastPullLink.ts;
+        }
+
+        // Determine which is the LAST action (rightmost visually, or latest timestamp)
+        const pushIsLast = lastPushTs && (!lastPullTs || lastPushTs >= lastPullTs);
+        const pullIsLast = lastPullTs && (!lastPushTs || lastPullTs > lastPushTs);
+
+        // Place label at the rightmost position for this agent
+        if (pushIsLast && lastPushEvt) {
+            const pos = evtPos[lastPushEvt.id];
             if (pos) {
-                const pushLabel = `PUSH \u25B2 ${agent}`;
-                const pushLabelW = pushLabel.length * 5.5 + 12;
+                const label = `PUSH \u25B2 ${agent}`;
+                const labelW = label.length * 5.5 + 12;
                 const labelG = g.append('g')
-                    .attr('transform', `translate(${pos.x - pushLabelW / 2},${pos.y - dotR - 18})`);
+                    .attr('transform', `translate(${pos.x - labelW / 2},${pos.y - dotR - 18})`);
                 labelG.append('rect')
-                    .attr('x', 0).attr('y', -9).attr('width', pushLabelW).attr('height', 18)
+                    .attr('x', 0).attr('y', -9).attr('width', labelW).attr('height', 18)
                     .attr('rx', 3)
-                    .attr('fill', (C[lastPush.type] || C.change) + '15')
-                    .attr('stroke', (C[lastPush.type] || C.change) + '35')
+                    .attr('fill', (C[lastPushEvt.type] || C.change) + '15')
+                    .attr('stroke', (C[lastPushEvt.type] || C.change) + '35')
                     .attr('stroke-width', 0.5);
                 labelG.append('text')
                     .attr('x', 5).attr('y', 3)
-                    .attr('fill', C[lastPush.type] || C.change)
+                    .attr('fill', C[lastPushEvt.type] || C.change)
                     .attr('font-size', '8px').attr('font-weight', '600')
                     .attr('letter-spacing', '0.3px')
-                    .text(pushLabel);
+                    .text(label);
             }
-        }
-
-        // Last PULL: label at BOTTOM-RIGHT of the ghost node
-        const lastPull = lastPullPerAgent[agent];
-        if (lastPull && evtPos[lastPull.event_id]) {
-            const srcPos = evtPos[lastPull.event_id];
-            const gx = srcPos.x;  // ghost X = original event X
-            const gy = laneY;     // ghost Y = puller's lane
-
-            const pullLabel = `${lastPull.event_user} \u25BC PULL`;
-            const pullLabelW = pullLabel.length * 5.5 + 12;
+        } else if (pullIsLast && lastPullLink) {
+            const gx = evtPos[lastPullLink.event_id] ? evtPos[lastPullLink.event_id].x : 0;
+            const label = `${lastPullLink.event_user} \u25BC PULL \u2192 ${agent}`;
+            const labelW = label.length * 5.5 + 12;
             const labelG = g.append('g')
-                .attr('transform', `translate(${gx - pullLabelW / 2 + dotR},${gy + dotR + 6})`);
+                .attr('transform', `translate(${gx - labelW / 2 + dotR},${laneY + dotR + 6})`);
             labelG.append('rect')
-                .attr('x', 0).attr('y', -9).attr('width', pullLabelW).attr('height', 18)
+                .attr('x', 0).attr('y', -9).attr('width', labelW).attr('height', 18)
                 .attr('rx', 3)
                 .attr('fill', 'rgba(0,229,160,0.08)')
                 .attr('stroke', 'rgba(0,229,160,0.20)')
@@ -842,17 +855,14 @@ function renderFlowView(data) {
                 .attr('fill', C.accent)
                 .attr('font-size', '8px').attr('font-weight', '600')
                 .attr('letter-spacing', '0.3px')
-                .text(pullLabel);
+                .text(label);
         }
 
         // Agent status summary at the right edge of the lane
         const rightEdge = effectiveW - margin.right + 4;
         const statusLines = [];
         if (agentEvts.length > 0) {
-            const last = agentEvts[agentEvts.length - 1];
-            const scope = last.scope || (last.files.length ? last.files[0].replace(/\\/, '/').replace(/\/[^/]+$/, '/*') : '');
-            statusLines.push({ text: `\u25B6 ${agentEvts.length} pushed`, color: C[last.type] || C.change });
-            if (scope) statusLines.push({ text: scope, color: '#4a5568' });
+            statusLines.push({ text: `\u25B6 ${agentEvts.length} pushed`, color: C[agentEvts[agentEvts.length - 1].type] || C.change });
         }
         const pullCount = pullLinks.filter(l => l.puller === agent).length;
         if (pullCount > 0) {

@@ -459,7 +459,10 @@ class MemoryStore:
         # Sort events chronologically
         all_events.sort(key=lambda e: _parse_ts(e.ts))
 
-        agents = sorted({e.user for e in all_events})
+        # Include both pushers and pullers in agent list
+        self._ensure_pull_log_loaded(repo_id)
+        puller_set = {entry["puller"] for entry in self._pull_log.get(repo_id, [])}
+        agents = sorted({e.user for e in all_events} | puller_set)
         events = [
             {
                 "id": e.id,
