@@ -116,6 +116,53 @@ def flush_pending_changes(state: dict, repo_id: str, user: str) -> dict:
 - `lesson`이 있으면 → `correction`/`decision` 타입으로 push
 - `lesson`이 없으면 → `change` 타입으로 push (현재 동작)
 
+### 7. Push 이벤트에 "why" 포함 (Phase 2-B 연계 과제)
+
+**배경 — A/B 테스트 결과:**
+
+Phase 1의 file-change 이벤트(`"Modified config.toml"`)만으로는 수신 에이전트의
+행동을 통계적으로 유의미하게 변화시키지 못한다 (10회 병렬 테스트, haiku).
+"무엇이 바뀌었는지(what)"만 전달되고 "왜 바뀌었는지(why)"가 없기 때문이다.
+
+```
+현재 (what only):
+  result: "Modified config.toml (1 file: config.toml)"
+  → 수신측: "config가 수정됐구나" (행동 변화 유도 불충분)
+
+목표 (what + why):
+  result: "Missing [server] section in config.toml → added port=3000, host=0.0.0.0"
+  → 수신측: "server 섹션이 없었구나, 내가 추가해야겠다" (선제적 행동 가능)
+```
+
+**접근 방법 (summary 없이, LLM 호출 없이):**
+
+1. **git diff 기반 result 보강**: flush 시점에 `pending_changes`의 파일들에 대해
+   `git diff HEAD -- <file>` 실행, diff snippet을 result에 포함
+   ```python
+   # build_change_events() 수정
+   result = f"Modified {scope}: {diff_summary}"
+   # diff_summary 예: "+[server]\n+port = 3000\n+host = '0.0.0.0'"
+   ```
+
+2. **Bash 실행 결과 캡처**: PostToolUse 직전의 Bash tool 실행에서 에러 출력이 있었다면,
+   해당 에러 메시지를 `pending_changes`의 `context` 필드에 기록
+   ```json
+   {"file": "config.toml", "scope": "...", "context": "KeyError: 'server' in network.js"}
+   ```
+
+3. **context → result 반영**: flush 시 context가 있으면 result에 포함
+   ```
+   "Fixed KeyError: 'server' in network.js → added [server] section to config.toml"
+   ```
+
+**SummaryGenerator와의 관계:**
+- SummaryGenerator(mock)가 비어있으면 원본 result를 그대로 유지 (no-op)
+- SummaryGenerator가 LLM을 호출할 수 있으면 diff + context를 요약
+- 어느 쪽이든 "why"는 git diff와 context로부터 LLM 없이 확보 가능
+
+**우선순위:** Phase 2-B의 `overmind-context.md` sync가 완성된 후,
+push 품질을 높이는 단계로 진행. A/B 테스트로 효과 검증.
+
 ## 테스트 보강
 
 ### Plugin 테스트 (`plugin/tests/` 신규 디렉토리)
