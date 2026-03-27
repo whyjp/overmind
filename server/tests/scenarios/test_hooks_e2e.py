@@ -11,12 +11,14 @@ Scenario:
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from overmind.api import create_app
-from tests.fixtures.server_helpers import ServerThread, api_post as _api_post, api_get as _api_get, run_hook, make_hook_env
+from tests.fixtures.server_helpers import ServerThread, HOOKS_DIR, api_post as _api_post, api_get as _api_get, run_hook, make_hook_env
 
 REPO_ID = "github.com/hooks-e2e/test"
 
@@ -136,6 +138,35 @@ class TestSessionStartHook:
         assert "RULES" in msg or "CONTEXT" in msg
         # Should contain the seeded auth event
         assert "auth" in msg or "bcrypt" in msg or "argon2" in msg
+
+    def test_session_start_creates_context_file(self, server, base_url, state_dir, seed_events, tmp_path):
+        """SessionStart writes .claude/overmind-context.md with pulled events."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        state_file = state_dir / "state_session_start_context_dev_b.json"
+        state_file.write_text(json.dumps({"last_pull_ts": "2026-03-25T00:00:00Z"}))
+        env = make_hook_env(base_url, state_file, "dev_b", REPO_ID)
+
+        script = HOOKS_DIR / "on_session_start.py"
+        subprocess.run(
+            [sys.executable, str(script)],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+            cwd=str(project_root),
+        )
+
+        context_file = project_root / ".claude" / "overmind-context.md"
+        assert context_file.exists(), "overmind-context.md was not created"
+
+        content = context_file.read_text(encoding="utf-8")
+        assert "# Overmind Team Context" in content
+        assert "argon2" in content or "auth" in content, (
+            f"Expected seed event content (argon2/auth) in context file, got: {content[:300]}"
+        )
 
     def test_self_excluded(self, server, base_url, state_dir, seed_events):
         env = _make_hook_env(base_url, state_dir, "dev_a", "session_start_self")
