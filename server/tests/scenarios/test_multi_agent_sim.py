@@ -73,6 +73,7 @@ def _make_env(base_url: str, state_file: Path, user: str) -> dict:
         "OVERMIND_USER": user,
         "OVERMIND_STATE_FILE": str(state_file),
         "OVERMIND_FLUSH_THRESHOLD": "5",
+        "OVERMIND_FLUSH_INTERVAL": "60",
         "PYTHONIOENCODING": "utf-8",
     }
 

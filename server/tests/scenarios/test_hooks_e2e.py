@@ -4,73 +4,21 @@ Starts uvicorn in a background thread, then runs hook scripts
 as subprocesses with env-var overrides for URL, user, repo_id, and state file.
 
 Scenario:
-  1. on_session_end (dev_a) → pushes a "session ended" event
+  1. on_session_end (dev_a) → flushes pending changes
   2. on_session_start (dev_b) → pulls and outputs systemMessage with dev_a's event
   3. on_pre_tool_use (dev_b) → scope-filtered pull for a file edit
 """
 
 import json
 import os
-import subprocess
-import sys
-import threading
-import time
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 import pytest
-import uvicorn
 
 from overmind.api import create_app
+from tests.fixtures.server_helpers import ServerThread, api_post as _api_post, api_get as _api_get, run_hook, make_hook_env
 
-PLUGIN_DIR = Path(__file__).resolve().parents[3] / "plugin"
-HOOKS_DIR = PLUGIN_DIR / "hooks"
 REPO_ID = "github.com/hooks-e2e/test"
-
-
-class ServerThread:
-    """Run uvicorn in a daemon thread with graceful shutdown."""
-
-    def __init__(self, app, port: int):
-        self.port = port
-        self.config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-        self.server = uvicorn.Server(self.config)
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
-
-    def start(self):
-        self.thread.start()
-        for _ in range(50):
-            time.sleep(0.1)
-            if self.server.started:
-                break
-        else:
-            raise RuntimeError("Server failed to start")
-
-    def stop(self):
-        self.server.should_exit = True
-        self.thread.join(timeout=5)
-
-
-def _api_post(base_url: str, path: str, body: dict):
-    data = json.dumps(body).encode("utf-8")
-    req = Request(
-        f"{base_url}{path}",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urlopen(req, timeout=5) as resp:
-        return json.loads(resp.read())
-
-
-def _api_get(base_url: str, path: str, params: dict | None = None):
-    url = f"{base_url}{path}"
-    if params:
-        url = f"{url}?{urlencode(params)}"
-    req = Request(url, method="GET")
-    with urlopen(req, timeout=5) as resp:
-        return json.loads(resp.read())
 
 
 @pytest.fixture(scope="module")
@@ -126,31 +74,7 @@ def seed_events(server, base_url):
 
 def _make_hook_env(base_url: str, state_dir: Path, user: str, test_name: str) -> dict:
     state_file = state_dir / f"state_{test_name}_{user}.json"
-    return {
-        **os.environ,
-        "OVERMIND_URL": base_url,
-        "OVERMIND_REPO_ID": REPO_ID,
-        "OVERMIND_USER": user,
-        "OVERMIND_STATE_FILE": str(state_file),
-        "PYTHONIOENCODING": "utf-8",
-    }
-
-
-def run_hook(script_name: str, env: dict, stdin_data: str = "") -> str:
-    """Run a hook script as subprocess, return stdout."""
-    script = HOOKS_DIR / script_name
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        input=stdin_data,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env=env,
-        cwd=str(PLUGIN_DIR),
-    )
-    if result.returncode != 0 and result.stderr:
-        print(f"Hook stderr: {result.stderr}", file=sys.stderr)
-    return result.stdout.strip()
+    return make_hook_env(base_url, state_file, user, REPO_ID)
 
 
 class TestSessionEndHook:

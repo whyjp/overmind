@@ -122,33 +122,36 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
     async def event_stream(repo_id: Optional[str] = Query(default=None)):
         """SSE endpoint: sends 'update' on repo data changes, 'repos' on new repo discovery."""
         async def generate():
-            last_repo_version = store.get_version(repo_id) if repo_id else 0
-            last_global_version = store.get_global_version()
-            last_repos = set(store.list_repos())
+            try:
+                last_repo_version = store.get_version(repo_id) if repo_id else 0
+                last_global_version = store.get_global_version()
+                last_repos = set(store.list_repos())
 
-            yield f"data: {json.dumps({'type': 'connected', 'repos': sorted(last_repos)})}\n\n"
+                yield f"data: {json.dumps({'type': 'connected', 'repos': sorted(last_repos)})}\n\n"
 
-            while True:
-                await asyncio.sleep(1)
+                while True:
+                    await asyncio.sleep(1)
 
-                current_global = store.get_global_version()
-                if current_global == last_global_version:
-                    continue  # nothing changed anywhere
-                last_global_version = current_global
+                    current_global = store.get_global_version()
+                    if current_global == last_global_version:
+                        continue  # nothing changed anywhere
+                    last_global_version = current_global
 
-                # Check for new repos
-                current_repos = set(store.list_repos())
-                new_repos = current_repos - last_repos
-                if new_repos:
-                    yield f"data: {json.dumps({'type': 'repos', 'new': sorted(new_repos), 'all': sorted(current_repos)})}\n\n"
-                    last_repos = current_repos
+                    # Check for new repos
+                    current_repos = set(store.list_repos())
+                    new_repos = current_repos - last_repos
+                    if new_repos:
+                        yield f"data: {json.dumps({'type': 'repos', 'new': sorted(new_repos), 'all': sorted(current_repos)})}\n\n"
+                        last_repos = current_repos
 
-                # Check repo-specific version (independent of new_repos)
-                if repo_id:
-                    current_repo_v = store.get_version(repo_id)
-                    if current_repo_v != last_repo_version:
-                        last_repo_version = current_repo_v
-                        yield f"data: {json.dumps({'type': 'update', 'version': current_repo_v})}\n\n"
+                    # Check repo-specific version (independent of new_repos)
+                    if repo_id:
+                        current_repo_v = store.get_version(repo_id)
+                        if current_repo_v != last_repo_version:
+                            last_repo_version = current_repo_v
+                            yield f"data: {json.dumps({'type': 'update', 'version': current_repo_v})}\n\n"
+            except asyncio.CancelledError:
+                return  # client disconnected — clean exit
 
         return StreamingResponse(
             generate(),

@@ -69,30 +69,26 @@ class TestFileToScope:
 
 
 class TestLoadSaveState:
-    def test_load_empty_state(self, tmp_path):
-        state_file = tmp_path / "state.json"
-        api_client.STATE_FILE = state_file
+    def test_load_empty_state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(api_client, "STATE_FILE", tmp_path / "state.json")
         assert api_client.load_state() == {}
 
-    def test_save_and_load(self, tmp_path):
-        state_file = tmp_path / "state.json"
-        api_client.STATE_FILE = state_file
+    def test_save_and_load(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(api_client, "STATE_FILE", tmp_path / "state.json")
         api_client.save_state({"last_pull_ts": "2026-03-27T10:00:00Z", "pending_changes": []})
         state = api_client.load_state()
         assert state["last_pull_ts"] == "2026-03-27T10:00:00Z"
         assert state["pending_changes"] == []
 
-    def test_overwrite_state(self, tmp_path):
-        state_file = tmp_path / "state.json"
-        api_client.STATE_FILE = state_file
+    def test_overwrite_state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(api_client, "STATE_FILE", tmp_path / "state.json")
         api_client.save_state({"key": "old"})
         api_client.save_state({"key": "new"})
         state = api_client.load_state()
         assert state["key"] == "new"
 
-    def test_preserves_unicode(self, tmp_path):
-        state_file = tmp_path / "state.json"
-        api_client.STATE_FILE = state_file
+    def test_preserves_unicode(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(api_client, "STATE_FILE", tmp_path / "state.json")
         api_client.save_state({"result": "한글 테스트"})
         state = api_client.load_state()
         assert state["result"] == "한글 테스트"

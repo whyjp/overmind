@@ -152,6 +152,15 @@ import asyncio
 
 @pytest.mark.asyncio
 class TestConcurrentPush:
+    """Concurrent push tests via asyncio.gather.
+
+    NOTE: These use ASGI in-process transport (no real network), so asyncio.gather
+    serializes under the GIL. This validates functional correctness (no data loss,
+    dedup works) but not true thread-safety under multi-process concurrent writes.
+    The JSONL store uses single-threaded append-only writes, so real concurrency
+    issues would only appear with actual multi-process access to the same files.
+    """
+
     async def test_concurrent_push_no_data_loss(self, client):
         """Multiple agents pushing concurrently should not lose events."""
         async def push_batch(user: str, start: int, count: int):

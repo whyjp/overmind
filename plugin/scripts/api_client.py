@@ -148,7 +148,11 @@ def should_flush(state: dict, new_scope: str) -> bool:
 
 
 def build_change_events(pending: list[dict]) -> list[dict]:
-    """Group pending changes by scope into change event dicts."""
+    """Group pending changes by scope into change event dicts.
+
+    Phase 2 TODO: when entry['lesson'] is not None, use lesson to determine
+    event type (correction/decision) instead of defaulting to 'change'.
+    """
     if not pending:
         return []
 
