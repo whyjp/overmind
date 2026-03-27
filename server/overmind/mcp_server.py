@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 
 from fastmcp import FastMCP
 
-from overmind.store import MemoryStore
+from overmind.store import SQLiteStore
 from overmind.models import MemoryEvent
 
 
-def create_mcp_server(store: MemoryStore) -> FastMCP:
+def create_mcp_server(store: SQLiteStore) -> FastMCP:
     mcp = FastMCP("Overmind", instructions="Distributed memory sync for Claude Code")
 
     @mcp.tool()
-    def overmind_push(repo_id: str, user: str, events: list[dict]) -> dict:
+    async def overmind_push(repo_id: str, user: str, events: list[dict]) -> dict:
         """Push memory events to Overmind server.
 
         Args:
@@ -30,11 +30,11 @@ def create_mcp_server(store: MemoryStore) -> FastMCP:
                 user=user,
                 **e,
             ))
-        accepted, duplicates = store.push(parsed)
+        accepted, duplicates = await store.push(parsed)
         return {"accepted": accepted, "duplicates": duplicates}
 
     @mcp.tool()
-    def overmind_pull(
+    async def overmind_pull(
         repo_id: str,
         exclude_user: str | None = None,
         since: str | None = None,
@@ -50,7 +50,7 @@ def create_mcp_server(store: MemoryStore) -> FastMCP:
             scope: Glob pattern to filter by file scope (e.g. "src/auth/*")
             limit: Maximum events to return (default 50)
         """
-        result = store.pull(
+        result = await store.pull(
             repo_id=repo_id,
             exclude_user=exclude_user,
             since=since,
@@ -60,7 +60,7 @@ def create_mcp_server(store: MemoryStore) -> FastMCP:
         return result.model_dump()
 
     @mcp.tool()
-    def overmind_broadcast(
+    async def overmind_broadcast(
         repo_id: str,
         user: str,
         message: str,
@@ -90,7 +90,7 @@ def create_mcp_server(store: MemoryStore) -> FastMCP:
             priority=priority,
             scope=scope,
         )
-        store.push([evt])
+        await store.push([evt])
         return {"id": evt_id, "delivered": True}
 
     return mcp

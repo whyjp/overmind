@@ -1,12 +1,16 @@
 import pytest
+import pytest_asyncio
 from fastmcp import Client
 from overmind.mcp_server import create_mcp_server
-from overmind.store import MemoryStore
+from overmind.store import SQLiteStore
 
 
-@pytest.fixture
-def store(data_dir):
-    return MemoryStore(data_dir=data_dir)
+@pytest_asyncio.fixture
+async def store(data_dir):
+    s = SQLiteStore(data_dir=data_dir)
+    await s.init_db()
+    yield s
+    await s.close()
 
 
 @pytest.fixture

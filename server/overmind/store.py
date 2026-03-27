@@ -125,17 +125,8 @@ class SQLiteStore:
         accepted_repos: set[str] = set()
 
         for evt in events:
-            # Check existence
             async with self.db.execute(
-                "SELECT 1 FROM events WHERE id = ?", (evt.id,)
-            ) as cur:
-                row = await cur.fetchone()
-            if row is not None:
-                duplicates += 1
-                continue
-
-            await self.db.execute(
-                """INSERT INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope)
+                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     evt.id,
@@ -150,9 +141,12 @@ class SQLiteStore:
                     evt.priority,
                     evt.scope,
                 ),
-            )
-            accepted += 1
-            accepted_repos.add(evt.repo_id)
+            ) as cur:
+                if cur.rowcount > 0:
+                    accepted += 1
+                    accepted_repos.add(evt.repo_id)
+                else:
+                    duplicates += 1
 
         if accepted > 0:
             await self.db.commit()

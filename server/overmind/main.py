@@ -9,14 +9,14 @@ import uvicorn
 
 from overmind.api import create_app
 from overmind.mcp_server import create_mcp_server
-from overmind.store import MemoryStore
+from overmind.store import SQLiteStore
 
 
 def create_standalone_app():
     """Factory for uvicorn --factory. Reads OVERMIND_DATA_DIR env var."""
     import os
     data_dir = Path(os.environ.get("OVERMIND_DATA_DIR", "data"))
-    store = MemoryStore(data_dir=data_dir)
+    store = SQLiteStore(data_dir=data_dir)
     return create_app(data_dir=data_dir, store=store)
 
 
@@ -28,7 +28,7 @@ def main() -> None:
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
-    store = MemoryStore(data_dir=data_dir)
+    store = SQLiteStore(data_dir=data_dir)
 
     # Create MCP app first to capture its lifespan
     mcp = create_mcp_server(store)

@@ -6,6 +6,7 @@ import asyncio
 import json
 import uuid
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,22 +24,31 @@ from overmind.models import (
     PushResponse,
     ReportResponse,
 )
-from overmind.store import MemoryStore
+from overmind.store import SQLiteStore
 
 
-def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = None, lifespan=None) -> FastAPI:
+def create_app(data_dir: Optional[Path] = None, store: Optional[SQLiteStore] = None, lifespan=None) -> FastAPI:
     """Create and configure the FastAPI application."""
     if data_dir is None:
         data_dir = Path("data")
 
     data_dir = Path(data_dir)
     if store is None:
-        store = MemoryStore(data_dir=data_dir)
+        store = SQLiteStore(data_dir=data_dir)
 
-    # Attempt cleanup on startup (best-effort, no repo_id required here)
-    # cleanup_expired requires repo_id, so we skip global cleanup at startup
+    outer_lifespan = lifespan
 
-    app = FastAPI(title="Overmind Memory Sync Server", lifespan=lifespan)
+    @asynccontextmanager
+    async def app_lifespan(app: FastAPI):
+        await store.init_db()
+        if outer_lifespan:
+            async with outer_lifespan(app):
+                yield
+        else:
+            yield
+        await store.close()
+
+    app = FastAPI(title="Overmind Memory Sync Server", lifespan=app_lifespan)
 
     # Mount dashboard static files if directory exists
     dashboard_dir = Path(__file__).parent / "dashboard" / "static"
@@ -47,12 +57,12 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
 
     @app.get("/api/repos")
     async def list_repos() -> list[str]:
-        return store.list_repos()
+        return await store.list_repos()
 
     @app.post("/api/memory/push", response_model=PushResponse)
     async def push_memory(request: PushRequest) -> PushResponse:
         events = [evt.to_event(request.repo_id, request.user) for evt in request.events]
-        accepted, duplicates = store.push(events)
+        accepted, duplicates = await store.push(events)
         return PushResponse(accepted=accepted, duplicates=duplicates)
 
     @app.get("/api/memory/pull", response_model=PullResponse)
@@ -63,14 +73,16 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
         user: Optional[str] = Query(default=None),
         exclude_user: Optional[str] = Query(default=None),
         limit: int = Query(default=100),
+        detail: str = Query(default="full"),
     ) -> PullResponse:
-        return store.pull(
+        return await store.pull(
             repo_id,
             since=since,
             scope=scope,
             user=user,
             exclude_user=exclude_user,
             limit=limit,
+            detail=detail,
         )
 
     @app.post("/api/memory/broadcast", response_model=BroadcastResponse)
@@ -89,7 +101,7 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
             scope=request.scope,
             files=request.related_files,
         )
-        store.push([event])
+        await store.push([event])
 
         return BroadcastResponse(id=bcast_id, delivered=True)
 
@@ -100,19 +112,19 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
         until: Optional[str] = Query(default=None),
         period: str = Query(default="7d"),
     ) -> ReportResponse:
-        return store.get_repo_stats(repo_id, since=since, until=until, period=period)
+        return await store.get_repo_stats(repo_id, since=since, until=until, period=period)
 
     @app.get("/api/report/graph")
     async def get_report_graph(repo_id: str = Query(...)):
-        return store.get_graph_data(repo_id)
+        return await store.get_graph_data(repo_id)
 
     @app.get("/api/report/flow")
     async def get_report_flow(repo_id: str = Query(...)):
-        return store.get_flow_data(repo_id)
+        return await store.get_flow_data(repo_id)
 
     @app.get("/api/report/timeline")
     async def get_report_timeline(repo_id: str = Query(...)):
-        pull_resp = store.pull(repo_id, limit=1000)
+        pull_resp = await store.pull(repo_id, limit=1000)
         swimlanes: dict[str, list] = defaultdict(list)
         for evt in pull_resp.events:
             swimlanes[evt.user].append(evt.model_dump())
@@ -125,7 +137,7 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
             try:
                 last_repo_version = store.get_version(repo_id) if repo_id else 0
                 last_global_version = store.get_global_version()
-                last_repos = set(store.list_repos())
+                last_repos = set(await store.list_repos())
 
                 yield f"data: {json.dumps({'type': 'connected', 'repos': sorted(last_repos)})}\n\n"
 
@@ -138,7 +150,7 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
                     last_global_version = current_global
 
                     # Check for new repos
-                    current_repos = set(store.list_repos())
+                    current_repos = set(await store.list_repos())
                     new_repos = current_repos - last_repos
                     if new_repos:
                         yield f"data: {json.dumps({'type': 'repos', 'new': sorted(new_repos), 'all': sorted(current_repos)})}\n\n"
