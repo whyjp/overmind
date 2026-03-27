@@ -91,8 +91,9 @@ function toggleAutoRefresh() {
         return;
     }
 
-    // Open SSE connection
-    const url = `${API}/api/stream?repo_id=${enc(currentRepo)}`;
+    // Open SSE connection — with repo_id if selected, global otherwise
+    const params = currentRepo ? `repo_id=${enc(currentRepo)}` : '';
+    const url = `${API}/api/stream${params ? '?' + params : ''}`;
     autoRefreshSource = new EventSource(url);
 
     autoRefreshSource.onmessage = (event) => {
@@ -100,6 +101,22 @@ function toggleAutoRefresh() {
             const data = JSON.parse(event.data);
             if (data.type === 'update') {
                 refreshActiveTab();
+            } else if (data.type === 'repos') {
+                // New repo discovered — update dropdown
+                const sel = document.getElementById('repo-id');
+                const existing = new Set([...sel.options].map(o => o.value));
+                (data.new || []).forEach(r => {
+                    if (!existing.has(r)) {
+                        const o = document.createElement('option');
+                        o.value = r; o.textContent = r;
+                        sel.appendChild(o);
+                    }
+                });
+                // Auto-select if nothing selected
+                if (!sel.value && data.all && data.all.length > 0) {
+                    sel.value = data.all[0];
+                    loadAll();
+                }
             }
             // 'connected' type — just confirms stream is alive
         } catch (e) {
@@ -108,13 +125,12 @@ function toggleAutoRefresh() {
     };
 
     autoRefreshSource.onerror = () => {
-        // Auto-reconnect is built into EventSource, just log
         console.warn('SSE connection error — will auto-reconnect');
     };
 
     btn.classList.add('active');
     label.textContent = 'LIVE';
-    refreshActiveTab();  // immediate first refresh
+    if (currentRepo) refreshActiveTab();
 }
 
 // Reconnect SSE when repo changes

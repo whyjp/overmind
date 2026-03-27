@@ -49,6 +49,8 @@ class MemoryStore:
         self._pull_log: dict[str, list[dict]] = defaultdict(list)
         # Version counter per repo — increments on every push (for SSE change detection)
         self._version: dict[str, int] = defaultdict(int)
+        # Global version — increments on any push to any repo (for new repo detection)
+        self._global_version: int = 0
 
     # ------------------------------------------------------------------
     # Repo listing
@@ -147,6 +149,7 @@ class MemoryStore:
 
         # Bump version for SSE change detection
         if accepted > 0:
+            self._global_version += 1
             repo_ids = {evt.repo_id for evt in events}
             for rid in repo_ids:
                 self._version[rid] += 1
@@ -156,6 +159,10 @@ class MemoryStore:
     def get_version(self, repo_id: str) -> int:
         """Return current version counter for a repo (for SSE change detection)."""
         return self._version[repo_id]
+
+    def get_global_version(self) -> int:
+        """Return global version counter (for new repo detection via SSE)."""
+        return self._global_version
 
     # ------------------------------------------------------------------
     # Pull

@@ -119,18 +119,34 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[MemoryStore] = N
         return {"swimlanes": swimlanes}
 
     @app.get("/api/stream")
-    async def event_stream(repo_id: str = Query(...)):
-        """SSE endpoint: sends 'update' event when repo data changes."""
+    async def event_stream(repo_id: Optional[str] = Query(default=None)):
+        """SSE endpoint: sends 'update' on repo changes, 'repos' on new repo discovery."""
         async def generate():
-            last_version = store.get_version(repo_id)
-            # Send initial version so client knows connection is alive
-            yield f"data: {json.dumps({'type': 'connected', 'version': last_version})}\n\n"
+            last_repo_version = store.get_version(repo_id) if repo_id else 0
+            last_global_version = store.get_global_version()
+            last_repos = set(store.list_repos())
+
+            yield f"data: {json.dumps({'type': 'connected', 'repos': sorted(last_repos)})}\n\n"
+
             while True:
                 await asyncio.sleep(1)
-                current = store.get_version(repo_id)
-                if current != last_version:
-                    yield f"data: {json.dumps({'type': 'update', 'version': current})}\n\n"
-                    last_version = current
+
+                # Check global version for new repos
+                current_global = store.get_global_version()
+                if current_global != last_global_version:
+                    last_global_version = current_global
+                    current_repos = set(store.list_repos())
+                    new_repos = current_repos - last_repos
+                    if new_repos:
+                        yield f"data: {json.dumps({'type': 'repos', 'new': sorted(new_repos), 'all': sorted(current_repos)})}\n\n"
+                        last_repos = current_repos
+
+                    # Check repo-specific version
+                    if repo_id:
+                        current_repo_v = store.get_version(repo_id)
+                        if current_repo_v != last_repo_version:
+                            yield f"data: {json.dumps({'type': 'update', 'version': current_repo_v})}\n\n"
+                            last_repo_version = current_repo_v
 
         return StreamingResponse(
             generate(),
