@@ -33,6 +33,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "matcher": "^(Write|Edit)$",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/on_post_tool_use.py\"",
+            "timeout": 3000
+          }
+        ]
+      }
     ]
   }
 }
