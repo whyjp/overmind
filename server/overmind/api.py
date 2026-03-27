@@ -18,6 +18,8 @@ from starlette.responses import StreamingResponse
 from overmind.models import (
     BroadcastRequest,
     BroadcastResponse,
+    FeedbackRequest,
+    FeedbackResponse,
     MemoryEvent,
     PullResponse,
     PushRequest,
@@ -104,6 +106,13 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[SQLiteStore] = N
         await store.push([event])
 
         return BroadcastResponse(id=bcast_id, delivered=True)
+
+    @app.post("/api/memory/feedback", response_model=FeedbackResponse)
+    async def record_feedback(request: FeedbackRequest) -> FeedbackResponse:
+        was_new, count = await store.record_feedback(
+            request.repo_id, request.event_id, request.user, request.type,
+        )
+        return FeedbackResponse(recorded=was_new, prevented_count=count)
 
     @app.get("/api/report", response_model=ReportResponse)
     async def get_report(

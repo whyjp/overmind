@@ -173,6 +173,59 @@ class TestReportEndpoint:
         assert len(body["edges"]) >= 1
 
 
+@pytest.mark.asyncio
+class TestFeedbackEndpoint:
+    async def test_feedback_prevented_error(self, client):
+        await client.post("/api/memory/push", json={
+            "repo_id": "github.com/test/repo",
+            "user": "dev_a",
+            "events": [{
+                "id": "evt_fb_001",
+                "type": "correction",
+                "ts": "2026-03-26T05:30:00Z",
+                "result": "found a critical bug",
+            }],
+        })
+        resp = await client.post("/api/memory/feedback", json={
+            "repo_id": "github.com/test/repo",
+            "event_id": "evt_fb_001",
+            "user": "dev_b",
+            "type": "prevented_error",
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["recorded"] is True
+        assert body["prevented_count"] == 1
+
+    async def test_feedback_dedup(self, client):
+        await client.post("/api/memory/push", json={
+            "repo_id": "github.com/test/repo",
+            "user": "dev_a",
+            "events": [{
+                "id": "evt_fb_002",
+                "type": "correction",
+                "ts": "2026-03-26T05:30:00Z",
+                "result": "another bug fix",
+            }],
+        })
+        await client.post("/api/memory/feedback", json={
+            "repo_id": "github.com/test/repo",
+            "event_id": "evt_fb_002",
+            "user": "dev_b",
+            "type": "prevented_error",
+        })
+        resp = await client.post("/api/memory/feedback", json={
+            "repo_id": "github.com/test/repo",
+            "event_id": "evt_fb_002",
+            "user": "dev_b",
+            "type": "prevented_error",
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["recorded"] is False
+        assert body["prevented_count"] == 1
+
+
 import asyncio
 
 
