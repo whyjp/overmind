@@ -90,6 +90,41 @@ class MemoryStore:
         date_str = dt.strftime("%Y-%m-%d")
         return self._repo_dir(repo_id) / "events" / user / f"{date_str}.jsonl"
 
+    def _pull_log_file(self, repo_id: str) -> Path:
+        return self._repo_dir(repo_id) / "pull_log.jsonl"
+
+    def _append_pull_log(self, repo_id: str, entry: dict) -> None:
+        """Append a pull log entry to disk."""
+        file_path = self._pull_log_file(repo_id)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with file_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+
+    def _load_pull_log(self, repo_id: str) -> list[dict]:
+        """Load pull log from disk for a repo."""
+        file_path = self._pull_log_file(repo_id)
+        if not file_path.exists():
+            return []
+        entries = []
+        try:
+            text = file_path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    continue
+        except OSError:
+            pass
+        return entries
+
+    def _ensure_pull_log_loaded(self, repo_id: str) -> None:
+        """Load pull log from disk into memory if not already loaded."""
+        if repo_id not in self._pull_log:
+            self._pull_log[repo_id] = self._load_pull_log(repo_id)
+
     def _read_repo_events(self, repo_id: str) -> list[MemoryEvent]:
         """Read all events for a repo from disk, rebuilding _seen_ids cache."""
         repo_dir = self._repo_dir(repo_id)
@@ -226,17 +261,20 @@ class MemoryStore:
         has_more = len(sorted_events) > limit
         result_events = sorted_events[:limit]
 
-        # Record pull history for graph visualization
+        # Record pull history for graph visualization (persist to disk)
         puller = exclude_user  # the user who's pulling (they exclude themselves)
         if puller:
+            self._ensure_pull_log_loaded(repo_id)
             now_iso = datetime.now(tz=timezone.utc).isoformat()
             for evt in result_events:
-                self._pull_log[repo_id].append({
+                entry = {
                     "puller": puller,
                     "event_id": evt.id,
                     "event_user": evt.user,
                     "ts": now_iso,
-                })
+                }
+                self._pull_log[repo_id].append(entry)
+                self._append_pull_log(repo_id, entry)
 
         return PullResponse(
             events=result_events,
@@ -277,6 +315,7 @@ class MemoryStore:
             events_by_type[evt.type] += 1
 
         # Count unique (puller, event_id) pairs from pull log
+        self._ensure_pull_log_loaded(repo_id)
         pull_log_entries = self._pull_log.get(repo_id, [])
         unique_pulls = len({(e["puller"], e["event_id"]) for e in pull_log_entries})
 
@@ -352,6 +391,7 @@ class MemoryStore:
 
         # Pull edges: create ghost (replica) nodes for consumed events
         # Ghost node = a copy of the event shown under the consuming agent
+        self._ensure_pull_log_loaded(repo_id)
         pull_seen: set[tuple[str, str]] = set()  # (puller, event_id) dedup
         for entry in self._pull_log.get(repo_id, []):
             puller = entry["puller"]
@@ -436,6 +476,7 @@ class MemoryStore:
         ]
 
         # Pull links: deduplicated (puller, event_id) pairs
+        self._ensure_pull_log_loaded(repo_id)
         pull_seen: set[tuple[str, str]] = set()
         pull_links = []
         for entry in self._pull_log.get(repo_id, []):
