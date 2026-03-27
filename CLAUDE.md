@@ -72,7 +72,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - PostToolUse lesson 필드 활용: 메모리/레슨 처리 플러그인 연동 시 자동 타입 분류
 
 **Phase 2-B: 클라이언트 레슨 반영 (수신 측 영향력)**
-- `.claude/overmind-context.md` 동기화: 훅이 관리하는 전용 파일, TTL 기반 만료
+- ~~`.claude/overmind-context.md` 동기화: 훅이 관리하는 전용 파일, TTL 기반 만료~~ ✅
 - pull 측 충돌 감지: 현재 편집 의도 vs 레슨 내용 비교 → deny/ask/systemMessage 판단
 - MCP resource: `overmind://memory/{repo_id}` 팀 메모리 조회
 - 구조화된 레슨 포맷: `{action, target, reason}` → 키워드 매칭 기반 충돌 감지

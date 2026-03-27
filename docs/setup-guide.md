@@ -90,6 +90,18 @@ claude mcp add overmind --transport http http://localhost:7777/mcp/
 | `OVERMIND_USER` | 시스템 `USER`/`USERNAME` | 에이전트 식별자 오버라이드 |
 | `OVERMIND_REPO_ID` | `git remote get-url origin`에서 자동 추출 | git 없는 환경 |
 
+## 팀 컨텍스트 활성화 (선택)
+
+Overmind이 세션 시작 시 동기화한 팀 규칙을 세션 전체에 걸쳐 유지하려면,
+프로젝트 CLAUDE.md에 다음 한 줄을 추가하세요:
+
+```
+- 팀 동기화 규칙은 .claude/overmind-context.md를 참고하라
+```
+
+이 파일은 SessionStart 훅이 자동으로 생성/갱신합니다. 직접 편집하지 마세요.
+`.claude/` 디렉토리는 `.gitignore`에 포함되어 있으므로 git에 커밋되지 않습니다.
+
 ## 동작 확인
 
 ### 서버 상태
