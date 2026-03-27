@@ -782,7 +782,7 @@ function renderFlowView(data) {
             });
     });
 
-    // --- Agent HEAD labels: last push & last pull per agent ---
+    // --- Agent HEAD labels: last push (left of node) & last pull (right of node) ---
     // Collect last pull (ghost) per agent: latest pull_link timestamp per puller
     const lastPullPerAgent = {};
     pullLinks.forEach(link => {
@@ -796,49 +796,53 @@ function renderFlowView(data) {
         const agentEvts = agentEvents[agent] || [];
         const laneY = yScale(agent) + yScale.bandwidth() / 2;
 
-        // Last PUSH: rightmost event on this agent's lane
+        // Last PUSH: label on LEFT side of the node
         if (agentEvts.length > 0) {
             const lastPush = agentEvts[agentEvts.length - 1];
             const pos = evtPos[lastPush.id];
             if (pos) {
+                const pushLabel = `PUSH \u25C0 ${agent}`;
+                const pushLabelW = pushLabel.length * 5.5 + 12;
                 const labelG = g.append('g')
-                    .attr('transform', `translate(${pos.x + dotR + 6},${pos.y})`);
+                    .attr('transform', `translate(${pos.x - dotR - 6},${pos.y})`);
                 labelG.append('rect')
-                    .attr('x', 0).attr('y', -8).attr('width', 62).attr('height', 16)
+                    .attr('x', -pushLabelW).attr('y', -9).attr('width', pushLabelW).attr('height', 18)
                     .attr('rx', 3)
-                    .attr('fill', (C[lastPush.type] || C.change) + '20')
-                    .attr('stroke', (C[lastPush.type] || C.change) + '40')
+                    .attr('fill', (C[lastPush.type] || C.change) + '15')
+                    .attr('stroke', (C[lastPush.type] || C.change) + '35')
                     .attr('stroke-width', 0.5);
                 labelG.append('text')
-                    .attr('x', 5).attr('y', 3)
+                    .attr('x', -pushLabelW + 5).attr('y', 3)
                     .attr('fill', C[lastPush.type] || C.change)
                     .attr('font-size', '8px').attr('font-weight', '600')
-                    .attr('letter-spacing', '0.5px')
-                    .text('LAST PUSH');
+                    .attr('letter-spacing', '0.3px')
+                    .text(pushLabel);
             }
         }
 
-        // Last PULL: find the ghost position for this agent's latest pull
+        // Last PULL: label on RIGHT side of the ghost node
         const lastPull = lastPullPerAgent[agent];
         if (lastPull && evtPos[lastPull.event_id]) {
             const srcPos = evtPos[lastPull.event_id];
             const gx = srcPos.x;  // ghost X = original event X
             const gy = laneY;     // ghost Y = puller's lane
 
+            const pullLabel = `${lastPull.event_user} \u25B6 PULL`;
+            const pullLabelW = pullLabel.length * 5.5 + 12;
             const labelG = g.append('g')
                 .attr('transform', `translate(${gx + dotR + 6},${gy})`);
             labelG.append('rect')
-                .attr('x', 0).attr('y', -8).attr('width', 56).attr('height', 16)
+                .attr('x', 0).attr('y', -9).attr('width', pullLabelW).attr('height', 18)
                 .attr('rx', 3)
                 .attr('fill', 'rgba(0,229,160,0.08)')
-                .attr('stroke', 'rgba(0,229,160,0.25)')
+                .attr('stroke', 'rgba(0,229,160,0.20)')
                 .attr('stroke-width', 0.5);
             labelG.append('text')
                 .attr('x', 5).attr('y', 3)
                 .attr('fill', C.accent)
                 .attr('font-size', '8px').attr('font-weight', '600')
-                .attr('letter-spacing', '0.5px')
-                .text('LAST PULL');
+                .attr('letter-spacing', '0.3px')
+                .text(pullLabel);
         }
 
         // Agent status summary at the right edge of the lane
