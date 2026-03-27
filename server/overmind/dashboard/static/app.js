@@ -21,10 +21,11 @@ function getActiveTab() {
 }
 
 async function refreshActiveTab() {
-    // Refresh repo list first — may discover new repos
-    await refreshRepoList();
-
-    if (!currentRepo) return;
+    if (!currentRepo) {
+        // No repo selected — try to pick one
+        await refreshRepoList();
+        if (!currentRepo) return;
+    }
 
     // Visual feedback: spin the refresh button
     const btn = document.getElementById('refresh-btn');
@@ -116,7 +117,8 @@ function toggleAutoRefresh() {
                 // Auto-select if nothing selected
                 if (!sel.value && data.all && data.all.length > 0) {
                     sel.value = data.all[0];
-                    loadAll();
+                    currentRepo = sel.value;
+                    loadAll();  // loadAll calls reconnectSSE → re-opens with repo_id
                 }
             }
             // 'connected' type — just confirms stream is alive
