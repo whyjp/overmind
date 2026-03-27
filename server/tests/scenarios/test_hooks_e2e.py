@@ -154,25 +154,51 @@ def run_hook(script_name: str, env: dict, stdin_data: str = "") -> str:
 
 
 class TestSessionEndHook:
-    """on_session_end.py: pushes a session-ended event."""
+    """on_session_end.py: flushes pending changes (no push if empty)."""
 
-    def test_push_event_to_server(self, server, base_url, state_dir):
+    def test_no_push_when_no_pending(self, server, base_url, state_dir):
+        """SessionEnd with no pending changes should not push anything."""
         env = _make_hook_env(base_url, state_dir, "dev_a", "session_end")
         run_hook("on_session_end.py", env, stdin_data="{}")
 
-        body = _api_get(base_url, "/api/memory/pull", {"repo_id": REPO_ID})
-        assert body["count"] >= 1
-        session_events = [e for e in body["events"] if "Session ended" in e["result"]]
-        assert len(session_events) == 1
-        assert session_events[0]["user"] == "dev_a"
-        assert session_events[0]["type"] == "discovery"
+        body = _api_get(base_url, "/api/memory/pull", {"repo_id": REPO_ID, "user": "dev_a"})
+        # No events from dev_a — SessionEnd only flushes pending, and there were none
+        session_events = [e for e in body["events"] if e["user"] == "dev_a"]
+        assert len(session_events) == 0
+
+    def test_flushes_pending_changes(self, server, base_url, state_dir):
+        """SessionEnd with pending changes should push grouped change events."""
+        state_file = state_dir / "state_session_end_flush_dev_a.json"
+        state_file.write_text(json.dumps({
+            "pending_changes": [
+                {"file": "src/auth/login.ts", "scope": "src/auth/*", "ts": "2026-03-27T10:00:00Z", "action": "Edit"},
+                {"file": "src/auth/jwt.ts", "scope": "src/auth/*", "ts": "2026-03-27T10:05:00Z", "action": "Edit"},
+            ],
+            "current_scope": "src/auth/*",
+        }))
+        env = {
+            **_make_hook_env(base_url, state_dir, "dev_a", "session_end_flush"),
+            "OVERMIND_STATE_FILE": str(state_file),
+        }
+        run_hook("on_session_end.py", env, stdin_data="{}")
+
+        body = _api_get(base_url, "/api/memory/pull", {"repo_id": REPO_ID, "user": "dev_a"})
+        change_events = [e for e in body["events"] if e["type"] == "change"]
+        assert len(change_events) >= 1
+        assert "src/auth/*" in change_events[0].get("result", "")
 
 
 class TestSessionStartHook:
     """on_session_start.py: pulls events and outputs systemMessage."""
 
     def test_pull_outputs_system_message(self, server, base_url, state_dir, seed_events):
-        env = _make_hook_env(base_url, state_dir, "dev_b", "session_start")
+        # Pre-seed state with old last_pull_ts so seed events are within pull window
+        state_file = state_dir / "state_session_start_dev_b.json"
+        state_file.write_text(json.dumps({"last_pull_ts": "2026-03-25T00:00:00Z"}))
+        env = {
+            **_make_hook_env(base_url, state_dir, "dev_b", "session_start"),
+            "OVERMIND_STATE_FILE": str(state_file),
+        }
         stdout = run_hook("on_session_start.py", env)
 
         assert stdout, "Hook produced no output"

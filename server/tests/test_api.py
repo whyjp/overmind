@@ -145,3 +145,72 @@ class TestReportEndpoint:
         body = resp.json()
         assert len(body["nodes"]) >= 2
         assert len(body["edges"]) >= 1
+
+
+import asyncio
+
+
+@pytest.mark.asyncio
+class TestConcurrentPush:
+    async def test_concurrent_push_no_data_loss(self, client):
+        """Multiple agents pushing concurrently should not lose events."""
+        async def push_batch(user: str, start: int, count: int):
+            for i in range(count):
+                await client.post("/api/memory/push", json={
+                    "repo_id": "github.com/stress/test",
+                    "user": user,
+                    "events": [{
+                        "id": f"stress_{user}_{start + i}",
+                        "type": "change",
+                        "ts": "2026-03-27T10:00:00Z",
+                        "result": f"change {i} by {user}",
+                        "files": [f"src/{user}/file_{i}.ts"],
+                    }],
+                })
+
+        # 5 agents push 10 events each concurrently
+        await asyncio.gather(
+            push_batch("agent_a", 0, 10),
+            push_batch("agent_b", 100, 10),
+            push_batch("agent_c", 200, 10),
+            push_batch("agent_d", 300, 10),
+            push_batch("agent_e", 400, 10),
+        )
+
+        resp = await client.get("/api/memory/pull", params={
+            "repo_id": "github.com/stress/test",
+            "limit": 100,
+        })
+        body = resp.json()
+        assert body["count"] == 50
+
+        # Verify all agents present
+        users = {e["user"] for e in body["events"]}
+        assert users == {"agent_a", "agent_b", "agent_c", "agent_d", "agent_e"}
+
+    async def test_concurrent_push_dedup(self, client):
+        """Same event ID pushed concurrently should be deduped."""
+        async def push_same(user: str):
+            await client.post("/api/memory/push", json={
+                "repo_id": "github.com/stress/dedup",
+                "user": user,
+                "events": [{
+                    "id": "shared_event_001",
+                    "type": "correction",
+                    "ts": "2026-03-27T10:00:00Z",
+                    "result": "shared fix",
+                }],
+            })
+
+        await asyncio.gather(
+            push_same("agent_a"),
+            push_same("agent_b"),
+            push_same("agent_c"),
+        )
+
+        resp = await client.get("/api/memory/pull", params={
+            "repo_id": "github.com/stress/dedup",
+        })
+        body = resp.json()
+        # Only 1 event should exist (dedup by id)
+        assert body["count"] == 1

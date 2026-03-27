@@ -9,16 +9,8 @@ import json
 import sys
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-from api_client import get_repo_id, get_user, api_get
+from api_client import get_repo_id, get_user, api_get, file_to_scope
 from formatter import format_pre_tool_use
-
-
-def file_to_scope(file_path: str) -> str:
-    """Convert file path to scope glob pattern."""
-    parts = file_path.replace("\\", "/").rsplit("/", 1)
-    if len(parts) == 2:
-        return parts[0] + "/*"
-    return file_path
 
 
 def main():

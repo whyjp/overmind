@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""SessionEnd hook: push session events to Overmind server."""
+"""SessionEnd hook: flush any remaining pending changes to Overmind server."""
 
 import json
 import sys
-import uuid
-from datetime import datetime, timezone
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-from api_client import get_repo_id, get_user, api_post
+from api_client import flush_pending_changes, get_repo_id, get_user, load_state, save_state
 
 
 def main():
@@ -18,19 +16,15 @@ def main():
         return
 
     user = get_user()
+    state = load_state()
 
-    evt = {
-        "id": f"session_{uuid.uuid4().hex[:12]}",
-        "type": "discovery",
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "result": f"Session ended by {user}",
-    }
+    # Flush remaining pending changes
+    if state.get("pending_changes"):
+        state = flush_pending_changes(state, repo_id, user)
 
-    api_post("/api/memory/push", {
-        "repo_id": repo_id,
-        "user": user,
-        "events": [evt],
-    })
+    # Clear session tracking state
+    state.pop("current_scope", None)
+    save_state(state)
 
 
 if __name__ == "__main__":

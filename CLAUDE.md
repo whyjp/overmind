@@ -24,14 +24,17 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - DB 관리 스크립트: `server/scripts/db_cleanup.py` (status/ttl/purge/compact/export)
 
 **Plugin** (`plugin/`):
-- Hook: SessionStart(auto pull), SessionEnd(auto push), PreToolUse(selective pull on Write/Edit)
+- Hook: SessionStart(auto pull), PostToolUse(변경 누적 + batch push), SessionEnd(잔여 flush), PreToolUse(selective pull + blocking)
+- PostToolUse: Write/Edit 완료 후 변경 파일을 state에 누적, 개수(5)/시간(30분)/스코프 전환 시 batch push
 - Portable hooks: 크로스 플랫폼 Python 경로 자동 감지
 - Skill: overmind-broadcast, overmind-report
 - Command: /overmind:broadcast
-- API client: urllib 기반 REST 호출, git remote → repo_id 정규화
+- API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 33개 전부 pass (models 7 + store 11 + api 9 + mcp 3 + scenarios 3)
+**Tests**: 110개 전부 pass
+- Server: 51개 (models 7 + store 11 + api 11 + mcp 3 + scenarios 19)
+- Plugin: 59개 (api_client 20 + flush_logic 14 + formatter 14 + hooks 11)
 
 **Docs**:
 - `docs/prd.md` — PRD
@@ -43,15 +46,10 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 ### 남은 작업
 
 **검증**:
-- 실제 2인 환경에서 push/pull 사이클 검증 (Go/No-Go 판정)
-- Plugin 실제 설치 테스트 (`claude --plugin-dir ./plugin`)
-- SessionEnd push 내용 개선: 현재 단순 "session ended" → 실제 correction/decision 캡처
-
-**테스트 보강**:
-- Hook 단위 테스트 (`plugin/tests/`): stdin 파이프 + 서버 mock
-- api_client.py 순수 함수 테스트: normalize_git_remote, file_to_scope 등
-- E2E 서버 시나리오 테스트: subprocess 기동 → httpx 실제 HTTP 호출
-- Concurrent push stress test: asyncio.gather race condition 검증
+- ~~실제 2인 환경에서 push/pull 사이클 검증~~ ✅
+- ~~Plugin 실제 설치 테스트~~ ✅
+- ~~SessionEnd push 내용 개선~~ ✅ PostToolUse로 세션 중 변경 자동 push, SessionEnd는 잔여 flush만
+- ~~테스트 보강~~ ✅ Plugin 59개 + Server 51개 = 110개 테스트
 
 ### 설계 인사이트 (스펙 반영 대기)
 
@@ -71,7 +69,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - `?detail=lesson|diff|full` pull 파라미터
 - SQLite store 이관
 - 피드백 점수 (relevance_score, prevented_error) 축적
-- SessionEnd 세션 내용 분석 → 의미 있는 이벤트 자동 추출
+- PostToolUse lesson 필드 활용: 메모리/레슨 처리 플러그인 연동 시 자동 타입 분류
 
 **Phase 2-B: 클라이언트 레슨 반영 (수신 측 영향력)**
 - `.claude/overmind-context.md` 동기화: 훅이 관리하는 전용 파일, TTL 기반 만료
@@ -131,8 +129,10 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 | `server/tests/scenarios/crosstest.py` | 교차 push/pull 테스트 스크립트 (서버 실행 상태에서) |
 | `server/scripts/db_cleanup.py` | JSONL store 관리 (status/ttl/purge/compact/export) |
 | `docs/setup-guide.md` | 플러그인 설치 가이드 (마켓플레이스/수동/환경변수) |
-| `plugin/hooks/` | Claude Code 훅 (Python 스크립트) |
-| `plugin/scripts/api_client.py` | 훅용 공유 HTTP 클라이언트 |
+| `plugin/hooks/` | Claude Code 훅 (SessionStart/PostToolUse/SessionEnd/PreToolUse) |
+| `plugin/hooks/on_post_tool_use.py` | PostToolUse 훅: 변경 누적 + batch push |
+| `plugin/scripts/api_client.py` | 훅용 공유 HTTP 클라이언트 + flush 로직 |
+| `plugin/tests/` | Plugin 테스트 (api_client, formatter, flush, hooks) |
 
 ## Conventions
 
