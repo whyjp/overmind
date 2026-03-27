@@ -65,6 +65,44 @@ OVERMIND_USER=agent_b claude
 
 Agent A 작업 → 세션 종료 → Agent B 세션 시작 시 Agent A의 이벤트가 자동 pull됩니다.
 
+## A/B Benchmark: Cross-Agent Lesson Sharing
+
+3개의 동일한 Claude 에이전트에게 같은 프롬프트(`bash start.sh`로 서버를 실행하라)를 주고,
+**Overmind 연결 여부만 다르게** 설정한 A/B 테스트 결과:
+
+```
+                    Pioneer       Student (+OM)     Naive (Control)
+                    ────────      ─────────────     ───────────────
+start.sh 실행           5               2                 5
+config.toml 수정        3               1                 4
+총 turns               16              12                17
+시간 (s)             45.6            36.5              49.8
+```
+
+Node.js 서버가 4개 모듈에서 **순차적으로 다른 에러**를 발생시키는 시나리오.
+Pioneer와 Naive는 **실행 -> 실패 -> 소스 분석 -> 수정**을 5회 반복했다.
+
+Student는 Overmind에서 Pioneer의 이벤트를 수신한 후,
+**첫 실패에서 전체 소스를 선행 분석 -> 1회 수정으로 완성 -> 2번째 실행에 성공**.
+
+```
+Pioneer/Naive:  start.sh → fail → read 1 file → fix → start.sh → fail → read 1 file → fix → ...
+Student:        start.sh → fail → read ALL files → fix everything → start.sh → done
+```
+
+> **한 에이전트의 시행착오가 다른 에이전트의 선행 분석을 유도한다.**
+> 실행 횟수 60% 감소, config 수정 75% 감소.
+
+상세 결과와 JSONL 분석: [`docs/benchmark-ab-test.md`](docs/benchmark-ab-test.md)
+
+실행 방법:
+```bash
+cd server
+AGENT_MODEL=haiku uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
+```
+
+---
+
 ## How it works
 
 ### Plugin Hook 동작
