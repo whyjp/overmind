@@ -9,7 +9,7 @@ import json
 import sys
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent / 'scripts'))
-from api_client import get_repo_id, get_user, api_get, file_to_scope
+from api_client import get_repo_id, get_user, api_get, api_post, file_to_scope
 from formatter import format_pre_tool_use
 
 
@@ -48,6 +48,15 @@ def main():
     ]
 
     if blocking_rules:
+        # Auto-feedback: these rules prevented an error
+        for evt in blocking_rules:
+            api_post("/api/memory/feedback", {
+                "repo_id": repo_id,
+                "event_id": evt["id"],
+                "user": user,
+                "type": "prevented_error",
+            })
+
         reasons = [evt["result"] for evt in blocking_rules]
         reason = " | ".join(reasons)
         output = {
