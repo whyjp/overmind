@@ -88,7 +88,9 @@ def run_agent(name: str, prompt: str, cwd: Path, state_file: Path) -> subprocess
         env=env,
         capture_output=True,
         text=True,
-        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
     )
 
 
@@ -132,23 +134,37 @@ def main():
         state_file = state_dir / f"state_{name}.json"
         print(f"  [{name}] Starting...")
         t0 = time.time()
-        results[name] = run_agent(name, prompt, repo_dir, state_file)
-        elapsed = time.time() - t0
-        rc = results[name].returncode
-        status = "OK" if rc == 0 else f"EXIT {rc}"
-        print(f"  [{name}] Done ({elapsed:.1f}s) — {status}")
+        try:
+            results[name] = run_agent(name, prompt, repo_dir, state_file)
+            elapsed = time.time() - t0
+            rc = results[name].returncode
+            status = "OK" if rc == 0 else f"EXIT {rc}"
+            print(f"  [{name}] Done ({elapsed:.1f}s) — {status}")
+        except subprocess.TimeoutExpired:
+            elapsed = time.time() - t0
+            print(f"  [{name}] TIMEOUT ({elapsed:.1f}s) — agent took too long, but events may have been pushed")
+            results[name] = None
 
     thread_a = threading.Thread(target=_run, args=("agent_a", AGENT_A_PROMPT))
     thread_b = threading.Thread(target=_run, args=("agent_b", AGENT_B_PROMPT))
 
     thread_a.start()
     thread_b.start()
-    thread_a.join(timeout=200)
-    thread_b.join(timeout=200)
+    thread_a.join(timeout=320)
+    thread_b.join(timeout=320)
 
     print()
 
-    # 4. Verify results
+    # 4. Print agent status
+    for name in ["agent_a", "agent_b"]:
+        r = results.get(name)
+        if r is None:
+            print(f"  [{name}] Timed out (events may still have been pushed)")
+        elif r.returncode != 0:
+            print(f"  [{name}] stderr: {r.stderr[:300]}")
+
+    # 5. Verify server state
+    print()
     print("=" * 60)
     print("Verification")
     print("=" * 60)

@@ -141,7 +141,9 @@ def _run_claude_agent(
         env=env,
         capture_output=True,
         text=True,
-        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
     )
 
 
