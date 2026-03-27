@@ -10,7 +10,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 ### 완료된 것
 
 **Server** (`server/`):
-- Pydantic 모델, JSONL file-based store (push/pull/dedup/scope filter/TTL)
+- Pydantic 모델, SQLite store with aiosqlite (push/pull/dedup/scope filter/TTL)
 - FastAPI REST API: push, pull, broadcast, report, graph, timeline, repos
 - FastMCP v3 wrapper: overmind_push, overmind_pull, overmind_broadcast (lifespan 수정 완료)
 - Web dashboard: Overview + Graph + Timeline + Flow View (Hive Mind 테마)
@@ -21,7 +21,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
   - Broadcast push/pull 카운트 정확 반영
 - Pull 이력 추적: 누가 어떤 이벤트를 consume했는지 in-memory 기록
 - 단일 프로세스에서 REST + MCP + Dashboard 서빙 (port 7777)
-- DB 관리 스크립트: `server/scripts/db_cleanup.py` (status/ttl/purge/compact/export)
+- DB 관리 스크립트: `server/scripts/db_cleanup.py` (status/ttl/purge/vacuum/export)
 
 **Plugin** (`plugin/`):
 - Hook: SessionStart(auto pull), PostToolUse(변경 누적 + batch push), SessionEnd(잔여 flush), PreToolUse(selective pull + blocking)
@@ -66,8 +66,8 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 
 **Phase 2-A: 서버 데이터 품질 개선**
 - 서버 측 서머리 생성 (경량 LLM — process→lesson 압축 시에만, **초기 구현은 mocking API로 처리**)
-- `?detail=lesson|diff|full` pull 파라미터
-- SQLite store 이관
+- ~~`?detail=summary|full` pull 파라미터~~ ✅
+- ~~SQLite store 이관~~ ✅
 - 피드백 점수 (relevance_score, prevented_error) 축적
 - PostToolUse lesson 필드 활용: 메모리/레슨 처리 플러그인 연동 시 자동 타입 분류
 
@@ -83,7 +83,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 ## Tech Stack
 
 - Python 3.11+, FastAPI, FastMCP v3, Pydantic v2, uvicorn
-- Storage: JSONL file-based (Phase 2: SQLite)
+- Storage: SQLite (aiosqlite)
 - Dashboard: Vanilla JS + D3.js v7 (CDN, no build)
 - Fonts: Pretendard + SUIT(한글) + Orbitron(디스플레이) + JetBrains Mono(코드)
 - Tests: pytest + pytest-asyncio + httpx TestClient + FastMCP in-memory Client
@@ -107,7 +107,7 @@ python server/tests/scenarios/crosstest.py
 # DB 관리
 python server/scripts/db_cleanup.py status          # 현황
 python server/scripts/db_cleanup.py ttl --days 14   # TTL 정리
-python server/scripts/db_cleanup.py compact          # 빈 파일/중복 제거
+python server/scripts/db_cleanup.py vacuum           # 디스크 공간 회수
 python server/scripts/db_cleanup.py export <repo_id> # JSONL 내보내기
 
 # MCP 연결
@@ -119,7 +119,7 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 | File | Purpose |
 |------|---------|
 | `server/overmind/models.py` | 모든 Pydantic 모델 (MemoryEvent, GraphEdge 등) |
-| `server/overmind/store.py` | JSONL store 핵심 로직 (push/pull/graph/stats/pull_log) |
+| `server/overmind/store.py` | SQLite store (StoreProtocol + SQLiteStore, push/pull/graph/stats) |
 | `server/overmind/api.py` | FastAPI REST 엔드포인트 (create_app) |
 | `server/overmind/mcp_server.py` | FastMCP 도구 래퍼 (create_mcp_server) |
 | `server/overmind/main.py` | 서버 진입점 (REST + MCP 동시 서빙) |
