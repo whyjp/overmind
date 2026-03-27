@@ -10,6 +10,7 @@ let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
 let activeScope = null; // currently selected scope filter
 let activeAgent = null; // currently selected agent filter (flow view)
 let flowXMode = 'time'; // 'time' (absolute) or 'seq' (sequential index)
+let flowShowPullEdges = true; // toggle cross-agent pull edges
 
 // --- Auto-refresh (SSE) ---
 let autoRefreshSource = null;  // EventSource for SSE
@@ -424,6 +425,17 @@ function renderFlowView(data) {
     seqBtn.addEventListener('click', () => { flowXMode = 'seq'; renderFlowView(data); });
     filterPanel.appendChild(seqBtn);
 
+    // Pull edges toggle
+    const pullToggle = document.createElement('button');
+    pullToggle.className = 'scope-btn' + (flowShowPullEdges ? ' active' : '');
+    pullToggle.textContent = flowShowPullEdges ? 'Pulls: ON' : 'Pulls: OFF';
+    pullToggle.title = 'Show/hide cross-agent pull edges';
+    pullToggle.addEventListener('click', () => {
+        flowShowPullEdges = !flowShowPullEdges;
+        renderFlowView(data);
+    });
+    filterPanel.appendChild(pullToggle);
+
     // Separator
     const sep = document.createElement('span');
     sep.className = 'scope-label';
@@ -675,20 +687,38 @@ function renderFlowView(data) {
     const evtDimmed = id => agentConn && !agentConn.has(id);
     const edgeDimmed = i => agentEdgeSet && !agentEdgeSet.has(i);
 
-    // Draw edges
-    flowEdges.forEach((d, i) => {
-        const midX = (d.sx + d.tx) / 2;
-        g.append('path')
-            .attr('d', `M${d.sx},${d.sy} C${midX},${d.sy} ${midX},${d.ty} ${d.tx},${d.ty}`)
-            .attr('fill', 'none')
-            .attr('stroke', edgeDimmed(i) ? 'rgba(0,229,160,0.06)' : 'rgba(0,229,160,0.35)')
-            .attr('stroke-width', edgeDimmed(i) ? 0.8 : 1.5)
-            .attr('stroke-dasharray', '5,3')
-            .attr('marker-end', edgeDimmed(i) ? '' : 'url(#a-flow-pull)')
-            .attr('class', 'flow-edge')
-            .attr('data-src', d.srcId)
-            .attr('data-tgt', d.tgtId || '');
+    // --- Intra-agent sequential edges (gray solid lines) ---
+    agents.forEach(agent => {
+        const evts = agentEvents[agent] || [];
+        for (let i = 0; i < evts.length - 1; i++) {
+            const from = evtPos[evts[i].id];
+            const to = evtPos[evts[i + 1].id];
+            if (!from || !to) continue;
+            g.append('line')
+                .attr('x1', from.x).attr('y1', from.y)
+                .attr('x2', to.x).attr('y2', to.y)
+                .attr('stroke', 'rgba(200,214,229,0.15)')
+                .attr('stroke-width', 1.2)
+                .attr('class', 'flow-seq-edge');
+        }
     });
+
+    // --- Cross-agent pull edges (green dashed curves) ---
+    if (flowShowPullEdges) {
+        flowEdges.forEach((d, i) => {
+            const midX = (d.sx + d.tx) / 2;
+            g.append('path')
+                .attr('d', `M${d.sx},${d.sy} C${midX},${d.sy} ${midX},${d.ty} ${d.tx},${d.ty}`)
+                .attr('fill', 'none')
+                .attr('stroke', edgeDimmed(i) ? 'rgba(0,229,160,0.06)' : 'rgba(0,229,160,0.35)')
+                .attr('stroke-width', edgeDimmed(i) ? 0.8 : 1.5)
+                .attr('stroke-dasharray', '5,3')
+                .attr('marker-end', edgeDimmed(i) ? '' : 'url(#a-flow-pull)')
+                .attr('class', 'flow-edge')
+                .attr('data-src', d.srcId)
+                .attr('data-tgt', d.tgtId || '');
+        });
+    }
 
     // --- Ghost dots: transparent replica at puller's row showing "received here" ---
     // For each pull edge, place a faint copy of the source event dot at the
@@ -894,9 +924,15 @@ function renderFlowView(data) {
         lg.append('text').attr('x', x + 14).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text(it.l);
     });
     const elX = typeItems.length * 90 + 16;
+    // Sequence edge
     lg.append('line').attr('x1', elX).attr('y1', 0).attr('x2', elX + 28).attr('y2', 0)
+        .attr('stroke', 'rgba(200,214,229,0.3)').attr('stroke-width', 1.2);
+    lg.append('text').attr('x', elX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text('sequence');
+    // Pull edge
+    const plX = elX + 100;
+    lg.append('line').attr('x1', plX).attr('y1', 0).attr('x2', plX + 28).attr('y2', 0)
         .attr('stroke', 'rgba(0,229,160,0.5)').attr('stroke-width', 1.3).attr('stroke-dasharray', '5,3');
-    lg.append('text').attr('x', elX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text('info flow (pull)');
+    lg.append('text').attr('x', plX + 34).attr('y', 3).attr('fill', '#4a5568').attr('font-size', '10px').text('pull flow');
     lg.append('text').attr('x', elX + 130).attr('y', 3).attr('fill', C.accent).attr('font-size', '10px').text('N\u2193 = pull count');
 }
 
