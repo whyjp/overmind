@@ -10,8 +10,7 @@ let timelineData = null;
 let graphViewMode = 'flow'; // 'flow', 'agent', or 'scope'
 let activeScope = null; // currently selected scope filter
 let activeAgent = null; // currently selected agent filter (flow view)
-let flowTimeZoomK = 1;    // flow view time axis zoom level
-let flowTimePanOffset = 0; // flow view time axis pan offset
+let flowXMode = 'time'; // 'time' (absolute) or 'seq' (sequential index)
 
 // --- Auto-refresh (SSE) ---
 let autoRefreshSource = null;  // EventSource for SSE
@@ -174,8 +173,6 @@ document.querySelectorAll('.view-btn').forEach(btn => {
         graphViewMode = btn.dataset.view;
         activeScope = null;
         activeAgent = null;
-        flowTimeZoomK = 1;
-        flowTimePanOffset = 0;
         renderGraph(graphData);
     });
 });
@@ -408,6 +405,33 @@ function renderFlowView(data) {
     const events = data.events || [];
     const pullLinks = data.pull_links || [];
 
+    // X-axis mode toggle: Time ↔ Sequence
+    const xModeLabel = document.createElement('span');
+    xModeLabel.className = 'scope-label';
+    xModeLabel.textContent = 'X-axis:';
+    filterPanel.appendChild(xModeLabel);
+
+    const timeBtn = document.createElement('button');
+    timeBtn.className = 'scope-btn' + (flowXMode === 'time' ? ' active' : '');
+    timeBtn.textContent = 'Time';
+    timeBtn.title = 'Absolute time — events positioned by timestamp';
+    timeBtn.addEventListener('click', () => { flowXMode = 'time'; renderFlowView(data); });
+    filterPanel.appendChild(timeBtn);
+
+    const seqBtn = document.createElement('button');
+    seqBtn.className = 'scope-btn' + (flowXMode === 'seq' ? ' active' : '');
+    seqBtn.textContent = 'Sequence';
+    seqBtn.title = 'Equal spacing — events positioned by chronological order';
+    seqBtn.addEventListener('click', () => { flowXMode = 'seq'; renderFlowView(data); });
+    filterPanel.appendChild(seqBtn);
+
+    // Separator
+    const sep = document.createElement('span');
+    sep.className = 'scope-label';
+    sep.textContent = '|';
+    sep.style.opacity = '0.3';
+    filterPanel.appendChild(sep);
+
     // Agent filter panel
     const agentLabel = document.createElement('span');
     agentLabel.className = 'scope-label';
@@ -437,21 +461,49 @@ function renderFlowView(data) {
     const totalH = Math.max(H, margin.top + agents.length * laneH + margin.bottom);
     const dotR = 8;
 
-    svg.attr('width', W).attr('height', totalH).attr('viewBox', `0 0 ${W} ${totalH}`);
+    const effectiveW = W;
+    svg.attr('width', effectiveW).attr('height', totalH).attr('viewBox', `0 0 ${effectiveW} ${totalH}`);
 
-    // Time scale — domain stored for Ctrl+Wheel zoom
-    const timeExtent = d3.extent(events, d => new Date(d.ts));
-    const timePad = (timeExtent[1] - timeExtent[0]) * 0.08 || 3600000;
-    const baseTimeDomain = [new Date(timeExtent[0] - timePad), new Date(+timeExtent[1] + timePad)];
-    const xRange = [margin.left + 20, W - margin.right - 20];
-    const xScale = d3.scaleTime().domain(baseTimeDomain).range(xRange);
+    // --- X-axis: Time mode vs Sequence mode ---
+    const xRange = [margin.left + 20, effectiveW - margin.right - 20];
+    let zoomedX;
 
-    function getZoomedXScale() {
-        const mid = (+baseTimeDomain[0] + +baseTimeDomain[1]) / 2;
-        const halfSpan = (+baseTimeDomain[1] - +baseTimeDomain[0]) / 2 / flowTimeZoomK;
-        const offset = flowTimePanOffset * (+baseTimeDomain[1] - +baseTimeDomain[0]) / 2;
-        return d3.scaleTime()
-            .domain([new Date(mid - halfSpan + offset), new Date(mid + halfSpan + offset)])
+    if (flowXMode === 'seq') {
+        // Sequence mode: equal spacing by chronological index
+        // Sort all events by timestamp, assign sequential index
+        const sorted = [...events].sort((a, b) => new Date(a.ts) - new Date(b.ts));
+        const evtIndex = {};
+        sorted.forEach((e, i) => { evtIndex[e.id] = i; });
+        zoomedX = (tsOrEvt) => {
+            // Accept either a Date (for grid) or use as lookup
+            if (tsOrEvt instanceof Date) {
+                // Find closest event index for grid lines
+                const t = +tsOrEvt;
+                let closest = 0;
+                let minDist = Infinity;
+                sorted.forEach((e, i) => {
+                    const d = Math.abs(+new Date(e.ts) - t);
+                    if (d < minDist) { minDist = d; closest = i; }
+                });
+                return d3.scaleLinear().domain([0, Math.max(sorted.length - 1, 1)]).range(xRange)(closest);
+            }
+            return d3.scaleLinear().domain([0, Math.max(sorted.length - 1, 1)]).range(xRange)(tsOrEvt);
+        };
+        // Store index lookup for event positioning
+        zoomedX._evtIndex = evtIndex;
+        zoomedX._sorted = sorted;
+        zoomedX._linear = d3.scaleLinear().domain([0, Math.max(sorted.length - 1, 1)]).range(xRange);
+        // For axis ticks
+        zoomedX.ticks = (n) => {
+            const step = Math.max(1, Math.floor(sorted.length / n));
+            return sorted.filter((_, i) => i % step === 0).map(e => new Date(e.ts));
+        };
+    } else {
+        // Time mode: absolute time scale
+        const timeExtent = d3.extent(events, d => new Date(d.ts));
+        const timePad = (timeExtent[1] - timeExtent[0]) * 0.08 || 3600000;
+        zoomedX = d3.scaleTime()
+            .domain([new Date(timeExtent[0] - timePad), new Date(+timeExtent[1] + timePad)])
             .range(xRange);
     }
 
@@ -463,71 +515,9 @@ function renderFlowView(data) {
 
     const g = svg.append('g');
 
-    // --- Zoom ---
-    // Drag = pan both axes (uniform transform on g)
-    // Ctrl+Wheel = zoom time axis only (re-renders node positions)
-    const uniformZoom = d3.zoom()
-        .scaleExtent([0.3, 4])
-        .filter(event => !event.ctrlKey) // skip Ctrl events
-        .on('zoom', e => g.attr('transform', e.transform));
-    svg.call(uniformZoom);
-
-    // Ctrl+Wheel: zoom time axis, re-layout nodes
-    svg.on('wheel', (event) => {
-        if (!event.ctrlKey) return;
-        event.preventDefault();
-        event.stopPropagation();
-
-        const factor = event.deltaY > 0 ? 0.85 : 1.15;
-        flowTimeZoomK = Math.max(0.5, Math.min(30, flowTimeZoomK * factor));
-
-        // Re-render with new time zoom (debounced via requestAnimationFrame)
-        requestAnimationFrame(() => renderFlowView(data));
-    }, { passive: false });
-
-    // Shift+Wheel: pan time axis
-    svg.on('wheel.timepan', (event) => {
-        if (!event.shiftKey || event.ctrlKey) return;
-        event.preventDefault();
-        const panStep = 0.05 / flowTimeZoomK;
-        flowTimePanOffset += event.deltaY > 0 ? panStep : -panStep;
-        requestAnimationFrame(() => renderFlowView(data));
-    }, { passive: false });
-
-    // Ctrl+0: reset time zoom
-    svg.on('keydown', (event) => {
-        if (event.ctrlKey && event.key === '0') {
-            event.preventDefault();
-            flowTimeZoomK = 1;
-            flowTimePanOffset = 0;
-            renderFlowView(data);
-        }
-    });
-    // Make SVG focusable for keyboard events
-    svg.attr('tabindex', 0);
-
-    // Apply current time zoom
-    const zoomedX = flowTimeZoomK !== 1 || flowTimePanOffset !== 0 ? getZoomedXScale() : xScale;
-
-    // Compute SVG width needed — expand if zoomed in
-    const effectiveW = Math.max(W, (W - margin.left - margin.right) * flowTimeZoomK + margin.left + margin.right);
-    svg.attr('width', effectiveW).attr('height', totalH).attr('viewBox', `0 0 ${effectiveW} ${totalH}`);
-
-    // Update xScale range for expanded width
-    if (flowTimeZoomK > 1) {
-        zoomedX.range([margin.left + 20, effectiveW - margin.right - 20]);
-    }
-
+    // Pan/zoom (uniform)
+    svg.call(d3.zoom().scaleExtent([0.3, 4]).on('zoom', e => g.attr('transform', e.transform)));
     svg.on('click', e => { if (e.target === svg.node()) dismissPopover(); });
-
-    // Time zoom indicator
-    if (flowTimeZoomK !== 1) {
-        svg.append('text')
-            .attr('x', effectiveW - 10).attr('y', 16)
-            .attr('text-anchor', 'end')
-            .attr('fill', C.accent).attr('font-size', '10px').attr('opacity', 0.6)
-            .text(`Time: ${flowTimeZoomK.toFixed(1)}x  (Ctrl+Wheel: zoom, Shift+Wheel: pan, Ctrl+0: reset)`);
-    }
 
     // Defs
     const defs = svg.append('defs');
@@ -549,26 +539,63 @@ function renderFlowView(data) {
             .text(agent);
     });
 
-    // Grid lines
-    zoomedX.ticks(Math.max(8, Math.round(8 * flowTimeZoomK))).forEach(tick => {
-        g.append('line')
-            .attr('x1', zoomedX(tick)).attr('x2', zoomedX(tick))
-            .attr('y1', margin.top).attr('y2', margin.top + agents.length * laneH)
-            .attr('stroke', '#0d1520').attr('stroke-width', 1);
-    });
-
-    // Time axis
+    // Grid lines + time axis
+    if (flowXMode === 'seq' && zoomedX._sorted) {
+        // Sequence mode: grid at every Nth event
+        const sorted = zoomedX._sorted;
+        const step = Math.max(1, Math.floor(sorted.length / 10));
+        sorted.forEach((evt, i) => {
+            if (i % step !== 0 && i !== sorted.length - 1) return;
+            const gx = zoomedX._linear(i);
+            g.append('line')
+                .attr('x1', gx).attr('x2', gx)
+                .attr('y1', margin.top).attr('y2', margin.top + agents.length * laneH)
+                .attr('stroke', '#0d1520').attr('stroke-width', 1);
+        });
+        // Axis: show event index + short timestamp
+        const axisG = g.append('g')
+            .attr('transform', `translate(0,${margin.top + agents.length * laneH + 4})`);
+        axisG.append('line')
+            .attr('x1', xRange[0]).attr('x2', xRange[1])
+            .attr('y1', 0).attr('y2', 0)
+            .attr('stroke', '#1a2332');
+        sorted.forEach((evt, i) => {
+            if (i % step !== 0 && i !== sorted.length - 1) return;
+            const gx = zoomedX._linear(i);
+            axisG.append('text')
+                .attr('x', gx).attr('y', 14)
+                .attr('text-anchor', 'middle')
+                .attr('fill', '#364152').attr('font-size', '9px')
+                .text(`#${i + 1}`);
+        });
+    } else {
+        // Time mode: standard D3 time axis
+        zoomedX.ticks(8).forEach(tick => {
+            g.append('line')
+                .attr('x1', zoomedX(tick)).attr('x2', zoomedX(tick))
+                .attr('y1', margin.top).attr('y2', margin.top + agents.length * laneH)
+                .attr('stroke', '#0d1520').attr('stroke-width', 1);
+        });
+    }
     const axisG = g.append('g')
-        .attr('transform', `translate(0,${margin.top + agents.length * laneH + 4})`)
-        .call(d3.axisBottom(zoomedX).ticks(Math.max(8, Math.round(8 * flowTimeZoomK))).tickSize(0).tickPadding(8));
+        .attr('transform', `translate(0,${margin.top + agents.length * laneH + 4})`);
+    if (flowXMode !== 'seq') {
+        axisG.call(d3.axisBottom(zoomedX).ticks(8).tickSize(0).tickPadding(8));
+    }
     axisG.select('.domain').attr('stroke', '#1a2332');
     axisG.selectAll('text').attr('fill', '#364152').attr('font-size', '10px');
 
     // Event positions
     const evtPos = {};
     events.forEach(evt => {
+        let ex;
+        if (flowXMode === 'seq' && zoomedX._evtIndex !== undefined) {
+            ex = zoomedX._linear(zoomedX._evtIndex[evt.id] ?? 0);
+        } else {
+            ex = zoomedX(new Date(evt.ts));
+        }
         evtPos[evt.id] = {
-            x: zoomedX(new Date(evt.ts)),
+            x: ex,
             y: yScale(evt.user) + yScale.bandwidth() / 2,
         };
     });
