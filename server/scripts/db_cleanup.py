@@ -97,6 +97,7 @@ def cmd_purge_repo(args: argparse.Namespace) -> None:
 
     conn.execute("DELETE FROM events WHERE repo_id = ?", (args.repo_id,))
     conn.execute("DELETE FROM pull_log WHERE repo_id = ?", (args.repo_id,))
+    conn.execute("DELETE FROM feedback WHERE repo_id = ?", (args.repo_id,))
     conn.commit()
     print(f"Purged repo '{args.repo_id}': {count} events deleted")
     conn.close()
@@ -186,6 +187,8 @@ def cmd_export(args: argparse.Namespace) -> None:
             "process": json.loads(row["process"]) if row["process"] else [],
             "priority": row["priority"],
             "scope": row["scope"],
+            "summary": row["summary"],
+            "prevented_count": row["prevented_count"],
         }
         out.write(json.dumps(event, ensure_ascii=False) + "\n")
 

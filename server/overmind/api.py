@@ -26,7 +26,7 @@ from overmind.models import (
     PushResponse,
     ReportResponse,
 )
-from overmind.store import SQLiteStore
+from overmind.store import SQLiteStore, DetailLevel
 
 
 def create_app(data_dir: Optional[Path] = None, store: Optional[SQLiteStore] = None, lifespan=None) -> FastAPI:
@@ -75,7 +75,7 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[SQLiteStore] = N
         user: Optional[str] = Query(default=None),
         exclude_user: Optional[str] = Query(default=None),
         limit: int = Query(default=100),
-        detail: str = Query(default="full"),
+        detail: DetailLevel = Query(default="full"),
     ) -> PullResponse:
         return await store.pull(
             repo_id,

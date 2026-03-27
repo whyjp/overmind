@@ -106,6 +106,7 @@ class SQLiteStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self.db_path))
         self._db.row_factory = aiosqlite.Row
+        await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.executescript(_SCHEMA)
         await self._migrate_columns()
 
@@ -600,6 +601,11 @@ class SQLiteStore:
         self, repo_id: str, event_id: str, user: str, feedback_type: str
     ) -> tuple[bool, int]:
         """Record feedback for an event. Returns (was_new, current_prevented_count)."""
+        # Check event exists
+        cursor = await self.db.execute("SELECT 1 FROM events WHERE id = ?", (event_id,))
+        if not await cursor.fetchone():
+            return False, 0
+
         now_iso = datetime.now(tz=timezone.utc).isoformat()
         async with self.db.execute(
             "INSERT OR IGNORE INTO feedback (repo_id, event_id, user, type, ts) VALUES (?, ?, ?, ?, ?)",
@@ -701,9 +707,3 @@ CREATE INDEX IF NOT EXISTS idx_feedback_event ON feedback(event_id);
 """
 
 
-# ---------------------------------------------------------------------------
-# Backward-compatible alias (used by api.py, mcp_server.py, main.py)
-# Will be removed once those modules are migrated to async.
-# ---------------------------------------------------------------------------
-
-MemoryStore = SQLiteStore

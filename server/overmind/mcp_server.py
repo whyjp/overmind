@@ -108,6 +108,9 @@ def create_mcp_server(store: SQLiteStore) -> FastMCP:
             user: User giving the feedback
             feedback_type: One of "prevented_error", "helpful", "irrelevant"
         """
+        allowed = {"prevented_error", "helpful", "irrelevant"}
+        if feedback_type not in allowed:
+            return {"error": f"Invalid feedback_type. Must be one of: {', '.join(sorted(allowed))}"}
         was_new, count = await store.record_feedback(repo_id, event_id, user, feedback_type)
         return {"recorded": was_new, "prevented_count": count}
 
