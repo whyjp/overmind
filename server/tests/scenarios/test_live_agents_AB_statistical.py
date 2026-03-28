@@ -125,6 +125,7 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
         naive_stats=naive_stats, student_elapsed=student_elapsed,
         naive_elapsed=naive_elapsed, n=N, m=M,
         scaffold_name=scaffold_name, model=model,
+        pioneer_elapsed=pioneer.elapsed,
     )
 
     # Phase 5: Save reports + JSONL

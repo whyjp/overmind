@@ -1,4 +1,4 @@
-"""ab_runner.py — Shared utilities for all A/B live-agent tests.
+"""ab_runner.py - Shared utilities for all A/B live-agent tests.
 
 Provides reusable agent running, analysis, statistics, and reporting
 functions extracted from the AB test scenarios.
@@ -430,7 +430,7 @@ def compute_elapsed_stats(results: list[AgentResult]) -> dict:
 
 
 def print_comparison_table(
-    pioneer: AgentResult,
+    pioneer: dict,
     student_stats: dict,
     naive_stats: dict,
     student_elapsed: dict,
@@ -439,11 +439,12 @@ def print_comparison_table(
     m: int,
     scaffold_name: str = "",
     model: str = "",
+    pioneer_elapsed: float = 0.0,
 ) -> None:
     """Print a formatted terminal comparison table of pioneer vs student vs naive."""
     header = "  A/B Comparison"
     if scaffold_name:
-        header += f" — {scaffold_name}"
+        header += f" - {scaffold_name}"
     if model:
         header += f" [{model}]"
     print(f"\n{'=' * 70}")
@@ -451,7 +452,7 @@ def print_comparison_table(
     print(f"  Pioneer: 1 run | Students (+Overmind): n={n} | Naives (control): m={m}")
     print(f"{'=' * 70}")
 
-    p_analysis = pioneer.analysis
+    p_analysis = pioneer
 
     # Numeric metrics
     print(f"\n  {'Metric':<28} {'Pioneer':>10} {'Student(avg)':>13} {'Naive(avg)':>12}")
@@ -461,17 +462,17 @@ def print_comparison_table(
         sv = student_stats.get(metric, {}).get("mean")
         nv = naive_stats.get(metric, {}).get("mean")
 
-        pv_str = "—" if pv is None else f"{pv}"
-        sv_str = "—" if sv is None else f"{sv:.1f}"
-        nv_str = "—" if nv is None else f"{nv:.1f}"
+        pv_str = "N/A" if pv is None else f"{pv}"
+        sv_str = "N/A" if sv is None else f"{sv:.1f}"
+        nv_str = "N/A" if nv is None else f"{nv:.1f}"
         print(f"  {metric:<28} {pv_str:>10} {sv_str:>13} {nv_str:>12}")
 
     # Elapsed time
     s_elapsed_mean = student_elapsed.get("mean")
     n_elapsed_mean = naive_elapsed.get("mean")
-    s_elapsed_str = "—" if s_elapsed_mean is None else f"{s_elapsed_mean:.1f}s"
-    n_elapsed_str = "—" if n_elapsed_mean is None else f"{n_elapsed_mean:.1f}s"
-    print(f"  {'elapsed (s)':<28} {pioneer.elapsed:>9.1f}s {s_elapsed_str:>13} {n_elapsed_str:>12}")
+    s_elapsed_str = "N/A" if s_elapsed_mean is None else f"{s_elapsed_mean:.1f}s"
+    n_elapsed_str = "N/A" if n_elapsed_mean is None else f"{n_elapsed_mean:.1f}s"
+    print(f"  {'elapsed (s)':<28} {pioneer_elapsed:>9.1f}s {s_elapsed_str:>13} {n_elapsed_str:>12}")
 
     # Boolean metrics
     print(f"\n  {'Boolean Metric':<28} {'Pioneer':>10} {'Student (%)':>13} {'Naive (%)':>12}")
@@ -482,8 +483,8 @@ def print_comparison_table(
         n_pct = naive_stats.get(metric, {}).get("pct_true")
 
         pv_str = str(pv)
-        sv_str = "—" if s_pct is None else f"{s_pct:.0f}%"
-        nv_str = "—" if n_pct is None else f"{n_pct:.0f}%"
+        sv_str = "N/A" if s_pct is None else f"{s_pct:.0f}%"
+        nv_str = "N/A" if n_pct is None else f"{n_pct:.0f}%"
         print(f"  {metric:<28} {pv_str:>10} {sv_str:>13} {nv_str:>12}")
 
     print()
