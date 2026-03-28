@@ -29,7 +29,7 @@ def detect_conflict(
     for evt in events:
         lesson = evt.get("lesson")
         if lesson:
-            verdict = _check_structured(lesson, tool_name, tool_input)
+            verdict = _check_structured(lesson, tool_name, tool_input, evt)
         else:
             verdict = _check_legacy(evt, file_path)
 
@@ -45,7 +45,9 @@ def detect_conflict(
     return "ignore", []
 
 
-def _check_structured(lesson: dict, tool_name: str, tool_input: dict) -> Verdict:
+def _check_structured(
+    lesson: dict, tool_name: str, tool_input: dict, evt: dict,
+) -> Verdict:
     """Evaluate a structured lesson against tool input."""
     action = lesson.get("action", "")
     target = lesson.get("target", "")
@@ -78,12 +80,39 @@ def _check_structured(lesson: dict, tool_name: str, tool_input: dict) -> Verdict
             return "warn"
 
     elif action == "require":
-        # Only warn if editing a relevant file and target keyword is absent
-        if file_path and target_lower not in new_content:
-            return "warn"
+        # Only warn if editing a file within the event's scope/files
+        if file_path and _event_relevant_to_file(evt, file_path):
+            if target_lower not in new_content:
+                return "warn"
 
     # "prefer" is advisory — handled by systemMessage, not conflict detection
     return "ignore"
+
+
+def _event_relevant_to_file(evt: dict, file_path: str) -> bool:
+    """Check if event's scope or files overlap with the given file path."""
+    file_lower = file_path.lower().replace("\\", "/")
+
+    # Check event's files list
+    for f in evt.get("files", []):
+        f_lower = f.lower().replace("\\", "/")
+        f_dir = f_lower.rsplit("/", 1)[0] if "/" in f_lower else ""
+        if f_lower == file_lower or (f_dir and file_lower.startswith(f_dir + "/")):
+            return True
+
+    # Check event's scope
+    scope = evt.get("scope", "")
+    if scope:
+        scope_lower = scope.lower().replace("\\", "/")
+        if scope_lower.endswith("/*"):
+            prefix = scope_lower[:-2]
+            if file_lower.startswith(prefix + "/") or file_lower.startswith(prefix):
+                return True
+        elif scope_lower in file_lower:
+            return True
+
+    # No scope/files info → not relevant (require shouldn't apply globally)
+    return False
 
 
 def _check_legacy(evt: dict, file_path: str) -> Verdict:

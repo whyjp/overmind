@@ -14,6 +14,15 @@ import pytest
 from pathlib import Path
 
 
+def pytest_addoption(parser):
+    parser.addoption("--student-n", type=int, default=3,
+                     help="Number of student (Overmind-enabled) iterations for statistical tests")
+    parser.addoption("--naive-m", type=int, default=3,
+                     help="Number of naive (no-Overmind) iterations for statistical tests")
+    parser.addoption("--agent-model", type=str, default="",
+                     help="Claude model for all agents (haiku/sonnet/opus)")
+
+
 @pytest.fixture
 def data_dir(tmp_path):
     """Temporary data directory for store tests."""

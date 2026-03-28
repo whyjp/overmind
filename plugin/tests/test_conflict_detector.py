@@ -77,17 +77,33 @@ class TestAvoidAction:
 
 class TestRequireAction:
     def test_require_missing_target_warns(self):
-        events = [{"id": "e1", "result": "input validation required", "lesson": {
-            "action": "require", "target": "validateInput", "reason": "security policy",
+        events = [{"id": "e1", "result": "input validation required",
+            "scope": "src/api/*",
+            "lesson": {
+                "action": "require", "target": "validateInput", "reason": "security policy",
         }}]
         verdict, _ = detect_conflict(
             "Edit", {"file_path": "src/api/users.ts", "new_string": "export function createUser(data) {"}, events
         )
         assert verdict == "warn"
 
+    def test_require_unrelated_scope_ignores(self):
+        """Require lesson with unrelated scope should not warn."""
+        events = [{"id": "e1", "result": "input validation required",
+            "scope": "src/cache/*",
+            "lesson": {
+                "action": "require", "target": "validateInput", "reason": "security policy",
+        }}]
+        verdict, _ = detect_conflict(
+            "Edit", {"file_path": "src/api/users.ts", "new_string": "export function createUser(data) {"}, events
+        )
+        assert verdict == "ignore"
+
     def test_require_target_present_ignores(self):
-        events = [{"id": "e1", "result": "input validation required", "lesson": {
-            "action": "require", "target": "validateInput", "reason": "security policy",
+        events = [{"id": "e1", "result": "input validation required",
+            "scope": "src/api/*",
+            "lesson": {
+                "action": "require", "target": "validateInput", "reason": "security policy",
         }}]
         verdict, _ = detect_conflict(
             "Edit", {"file_path": "src/api/users.ts", "new_string": "validateInput(data)"}, events
