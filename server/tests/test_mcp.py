@@ -77,6 +77,46 @@ class TestMCPTools:
             })
             assert "recorded" in str(result)
 
+    async def test_overmind_memory(self, mcp):
+        """overmind_memory tool returns formatted markdown."""
+        async with Client(mcp) as dev_a, Client(mcp) as reader:
+            await dev_a.call_tool("overmind_push", {
+                "repo_id": "github.com/test/memory-repo",
+                "user": "dev_a",
+                "events": [
+                    {
+                        "id": "mem_001", "type": "correction",
+                        "ts": "2026-03-28T10:00:00Z",
+                        "result": "use argon2 for password hashing",
+                        "lesson": {
+                            "action": "replace", "target": "bcrypt",
+                            "reason": "security", "replacement": "argon2",
+                        },
+                    },
+                    {
+                        "id": "mem_002", "type": "discovery",
+                        "ts": "2026-03-28T10:01:00Z",
+                        "result": "found unused API endpoint",
+                    },
+                ],
+            })
+            result = await reader.call_tool("overmind_memory", {
+                "repo_id": "github.com/test/memory-repo",
+            })
+            content = str(result)
+            assert "Team Memory" in content
+            assert "argon2" in content
+            assert "unused API endpoint" in content
+
+    async def test_overmind_memory_empty(self, mcp):
+        """overmind_memory returns placeholder for empty repo."""
+        async with Client(mcp) as reader:
+            result = await reader.call_tool("overmind_memory", {
+                "repo_id": "github.com/test/empty-repo",
+            })
+            content = str(result)
+            assert "No team memory" in content
+
     async def test_concurrent_push(self, mcp):
         import asyncio
 

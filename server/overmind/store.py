@@ -19,6 +19,7 @@ from overmind.models import (
     PolymorphismAlert,
     PullResponse,
     ReportResponse,
+    StructuredLesson,
 )
 from overmind.summary import MockSummaryGenerator, SummaryGenerator
 
@@ -118,6 +119,8 @@ class SQLiteStore:
             await self.db.execute("ALTER TABLE events ADD COLUMN summary TEXT")
         if "prevented_count" not in cols:
             await self.db.execute("ALTER TABLE events ADD COLUMN prevented_count INTEGER DEFAULT 0")
+        if "lesson" not in cols:
+            await self.db.execute("ALTER TABLE events ADD COLUMN lesson TEXT")
         await self.db.commit()
 
     async def close(self) -> None:
@@ -147,8 +150,8 @@ class SQLiteStore:
                 evt.summary = await self._summary_generator.generate(evt)
 
             async with self.db.execute(
-                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope, summary, prevented_count)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope, summary, prevented_count, lesson)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     evt.id,
                     evt.repo_id,
@@ -163,6 +166,7 @@ class SQLiteStore:
                     evt.scope,
                     evt.summary,
                     evt.prevented_count,
+                    json.dumps(evt.lesson.model_dump()) if evt.lesson else None,
                 ),
             ) as cur:
                 if cur.rowcount > 0:
@@ -214,6 +218,9 @@ class SQLiteStore:
             process = []
             prompt = None
 
+        lesson_raw = row["lesson"]
+        lesson = StructuredLesson(**json.loads(lesson_raw)) if lesson_raw else None
+
         return MemoryEvent(
             id=row["id"],
             repo_id=row["repo_id"],
@@ -228,6 +235,7 @@ class SQLiteStore:
             scope=row["scope"],
             summary=row["summary"],
             prevented_count=row["prevented_count"] or 0,
+            lesson=lesson,
         )
 
     async def pull(
@@ -674,7 +682,8 @@ CREATE TABLE IF NOT EXISTS events (
     priority TEXT DEFAULT 'normal',
     scope TEXT,
     summary TEXT,
-    prevented_count INTEGER DEFAULT 0
+    prevented_count INTEGER DEFAULT 0,
+    lesson TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo_id);

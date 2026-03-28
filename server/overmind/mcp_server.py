@@ -11,6 +11,44 @@ from overmind.store import SQLiteStore
 from overmind.models import MemoryEvent
 
 
+def _format_memory_resource(events: list[MemoryEvent]) -> str:
+    """Format events as readable markdown for MCP resource."""
+    if not events:
+        return "No team memory events found for this repository."
+
+    sections: dict[str, list[str]] = {
+        "Rules (corrections/decisions)": [],
+        "Changes": [],
+        "Context (discoveries)": [],
+        "Announcements (broadcasts)": [],
+    }
+
+    for evt in events:
+        line = f"- **{evt.user}** ({evt.ts[:16]}): {evt.result}"
+        if evt.lesson:
+            line += f"\n  Lesson: {evt.lesson.action} `{evt.lesson.target}` — {evt.lesson.reason}"
+            if evt.lesson.replacement:
+                line += f" → use `{evt.lesson.replacement}`"
+
+        if evt.type in ("correction", "decision"):
+            sections["Rules (corrections/decisions)"].append(line)
+        elif evt.type == "broadcast":
+            sections["Announcements (broadcasts)"].append(line)
+        elif evt.type == "change":
+            sections["Changes"].append(line)
+        else:
+            sections["Context (discoveries)"].append(line)
+
+    lines = [f"# Team Memory ({len(events)} events)", ""]
+    for title, items in sections.items():
+        if items:
+            lines.append(f"## {title}")
+            lines.extend(items)
+            lines.append("")
+
+    return "\n".join(lines)
+
+
 def create_mcp_server(store: SQLiteStore) -> FastMCP:
     mcp = FastMCP("Overmind", instructions="Distributed memory sync for Claude Code")
 
@@ -92,6 +130,25 @@ def create_mcp_server(store: SQLiteStore) -> FastMCP:
         )
         await store.push([evt])
         return {"id": evt_id, "delivered": True}
+
+    @mcp.tool()
+    async def overmind_memory(
+        repo_id: str,
+        scope: str | None = None,
+        limit: int = 30,
+    ) -> str:
+        """Browse team memory for a repository as formatted markdown.
+
+        Use this to understand what other agents have been doing, what rules
+        exist, and what corrections/decisions have been made.
+
+        Args:
+            repo_id: Repository identifier (e.g. "github.com/user/project")
+            scope: Optional glob pattern to filter by scope (e.g. "src/auth/*")
+            limit: Maximum events (default 30)
+        """
+        result = await store.pull(repo_id=repo_id, scope=scope, limit=limit, detail="summary")
+        return _format_memory_resource(result.events)
 
     @mcp.tool()
     async def overmind_feedback(

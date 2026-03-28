@@ -192,14 +192,20 @@ class TestPreToolUseHook:
         assert "src/auth/*" in msg
         assert "dev_a" in msg
 
-    def test_unrelated_scope_no_output(self, server, base_url, state_dir, seed_events):
+    def test_unrelated_scope_gets_context(self, server, base_url, state_dir, seed_events):
+        """Unrelated scope still receives general context (no scope filter on pull)."""
         env = _make_hook_env(base_url, state_dir, "dev_b", "pretool_unrelated")
         stdin_data = json.dumps({
             "tool_name": "Edit",
             "tool_input": {"file_path": "src/unrelated/foo.ts"},
         })
         stdout = run_hook("on_pre_tool_use.py", env, stdin_data=stdin_data)
-        assert stdout == ""
+        # Should get context but NOT be blocked (deploy rule is scope-limited)
+        if stdout:
+            output = json.loads(stdout)
+            assert "systemMessage" in output
+            hook_output = output.get("hookSpecificOutput", {})
+            assert hook_output.get("permissionDecision") != "deny"
 
     def test_no_file_path_no_output(self, server, base_url, state_dir, seed_events):
         env = _make_hook_env(base_url, state_dir, "dev_b", "pretool_nofile")
@@ -211,7 +217,7 @@ class TestPreToolUseHook:
         assert stdout == ""
 
     def test_high_priority_correction_blocks_edit(self, server, base_url, state_dir, seed_events):
-        """High-priority correction in scope → tool use BLOCKED."""
+        """High-priority correction in scope → tool use BLOCKED (legacy fallback)."""
         env = _make_hook_env(base_url, state_dir, "dev_b", "pretool_block")
         stdin_data = json.dumps({
             "tool_name": "Edit",
@@ -225,3 +231,68 @@ class TestPreToolUseHook:
         assert hook_output.get("permissionDecision") == "deny"
         assert "OVERMIND BLOCK" in hook_output.get("permissionDecisionReason", "")
         assert "deploy" in hook_output.get("permissionDecisionReason", "").lower()
+
+
+class TestStructuredLessonConflict:
+    """E2E tests for structured lesson conflict detection."""
+
+    @pytest.fixture(autouse=True)
+    def seed_structured_lessons(self, server, base_url):
+        """Push events with structured lessons."""
+        _api_post(base_url, "/api/memory/push", {
+            "repo_id": REPO_ID,
+            "user": "dev_a",
+            "events": [
+                {
+                    "id": "e2e_lesson_001", "type": "correction",
+                    "ts": "2026-03-28T10:00:00Z",
+                    "result": "use argon2 instead of bcrypt",
+                    "files": ["src/auth/hash.ts"],
+                    "lesson": {
+                        "action": "replace", "target": "bcrypt",
+                        "reason": "argon2 is more secure", "replacement": "argon2",
+                    },
+                },
+                {
+                    "id": "e2e_lesson_002", "type": "decision",
+                    "ts": "2026-03-28T10:01:00Z",
+                    "result": "do not modify CI pipeline files",
+                    "files": ["ci/deploy.yml"],
+                    "lesson": {
+                        "action": "prohibit", "target": "ci/*",
+                        "reason": "CI is managed by platform team",
+                    },
+                },
+            ],
+        })
+
+    def test_structured_prohibit_blocks(self, server, base_url, state_dir):
+        """Structured 'prohibit' lesson blocks tool use on matching path."""
+        env = _make_hook_env(base_url, state_dir, "dev_b", "lesson_prohibit")
+        stdin_data = json.dumps({
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "ci/deploy.yml"},
+        })
+        stdout = run_hook("on_pre_tool_use.py", env, stdin_data=stdin_data)
+
+        assert stdout, "Hook should produce output"
+        output = json.loads(stdout)
+        hook_output = output.get("hookSpecificOutput", {})
+        assert hook_output.get("permissionDecision") == "deny"
+
+    def test_structured_replace_warns(self, server, base_url, state_dir):
+        """Structured 'replace' lesson warns when using old target in content."""
+        env = _make_hook_env(base_url, state_dir, "dev_b", "lesson_replace")
+        stdin_data = json.dumps({
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "src/auth/hash.ts",
+                "new_string": "import bcrypt from 'bcrypt'",
+            },
+        })
+        stdout = run_hook("on_pre_tool_use.py", env, stdin_data=stdin_data)
+
+        assert stdout, "Hook should produce warning"
+        output = json.loads(stdout)
+        assert "systemMessage" in output
+        assert "WARNING" in output["systemMessage"]

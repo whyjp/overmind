@@ -1,6 +1,6 @@
 import pytest
 import pytest_asyncio
-from overmind.models import MemoryEvent
+from overmind.models import MemoryEvent, StructuredLesson
 from overmind.store import SQLiteStore
 from overmind.summary import MockSummaryGenerator
 
@@ -244,3 +244,50 @@ class TestFeedback:
         stats = await store.get_repo_stats("github.com/test/repo")
         assert stats.total_feedback == 2
         assert stats.prevented_errors == 1
+
+
+@pytest.mark.asyncio
+class TestLesson:
+    async def test_push_pull_with_lesson(self, store):
+        """Events with structured lessons round-trip through DB."""
+        lesson = StructuredLesson(
+            action="replace", target="bcrypt",
+            reason="argon2 is more secure", replacement="argon2",
+        )
+        evt = MemoryEvent(
+            id="evt_lesson_1", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-28T10:00:00Z",
+            type="correction", result="use argon2 instead of bcrypt",
+            lesson=lesson,
+        )
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        assert result.events[0].lesson is not None
+        assert result.events[0].lesson.action == "replace"
+        assert result.events[0].lesson.target == "bcrypt"
+        assert result.events[0].lesson.replacement == "argon2"
+
+    async def test_push_pull_without_lesson(self, store):
+        """Events without lesson have lesson=None after round-trip."""
+        evt = _make_event("evt_lesson_2")
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        assert result.events[0].lesson is None
+
+    async def test_lesson_in_api_json(self, store):
+        """Lesson serializes to JSON dict in API response."""
+        lesson = StructuredLesson(
+            action="prohibit", target="src/deploy/*",
+            reason="deploy scripts managed by CI",
+        )
+        evt = MemoryEvent(
+            id="evt_lesson_3", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-28T10:00:00Z",
+            type="decision", result="do not modify deploy scripts",
+            lesson=lesson,
+        )
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        dumped = result.events[0].model_dump()
+        assert dumped["lesson"]["action"] == "prohibit"
+        assert dumped["lesson"]["replacement"] is None

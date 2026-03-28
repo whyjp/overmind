@@ -10,6 +10,19 @@ from pydantic import BaseModel, Field, model_validator
 EventType = Literal["decision", "correction", "discovery", "change", "broadcast"]
 Priority = Literal["normal", "high_priority"]
 FeedbackType = Literal["prevented_error", "helpful", "irrelevant"]
+LessonAction = Literal["prohibit", "prefer", "require", "avoid", "replace"]
+
+
+class StructuredLesson(BaseModel):
+    """Structured lesson attached to correction/decision events.
+
+    Enables keyword-based conflict detection in PreToolUse hooks.
+    """
+
+    action: LessonAction
+    target: str
+    reason: str
+    replacement: str | None = None
 
 
 class MemoryEvent(BaseModel):
@@ -30,6 +43,7 @@ class MemoryEvent(BaseModel):
     scope: str | None = None
     summary: str | None = None
     prevented_count: int = 0
+    lesson: StructuredLesson | None = None
 
 
 class PushEventInput(BaseModel):
@@ -48,6 +62,7 @@ class PushEventInput(BaseModel):
     process: list[str] = Field(default_factory=list)
     priority: Priority = "normal"
     scope: str | None = None
+    lesson: StructuredLesson | None = None
 
     def to_event(self, repo_id: str, user: str) -> MemoryEvent:
         return MemoryEvent(

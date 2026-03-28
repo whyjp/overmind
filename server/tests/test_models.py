@@ -1,5 +1,5 @@
 import pytest
-from overmind.models import MemoryEvent, PushRequest, BroadcastRequest
+from overmind.models import MemoryEvent, PushRequest, BroadcastRequest, StructuredLesson
 
 
 class TestMemoryEvent:
@@ -93,3 +93,54 @@ class TestBroadcastRequest:
             message="test broadcast",
         )
         assert req.priority == "normal"
+
+
+class TestStructuredLesson:
+    def test_valid_lesson(self):
+        lesson = StructuredLesson(
+            action="prohibit",
+            target="src/deploy/*",
+            reason="deploy scripts are managed by CI",
+        )
+        assert lesson.action == "prohibit"
+        assert lesson.replacement is None
+
+    def test_replace_with_replacement(self):
+        lesson = StructuredLesson(
+            action="replace",
+            target="bcrypt",
+            reason="argon2 is more secure",
+            replacement="argon2",
+        )
+        assert lesson.replacement == "argon2"
+
+    def test_invalid_action_rejected(self):
+        with pytest.raises(ValueError):
+            StructuredLesson(action="delete", target="x", reason="y")
+
+    def test_event_with_lesson(self):
+        evt = MemoryEvent(
+            id="evt_010",
+            repo_id="github.com/user/project",
+            user="dev_a",
+            ts="2026-03-28T10:00:00Z",
+            type="correction",
+            result="bcrypt 대신 argon2 사용",
+            lesson=StructuredLesson(
+                action="replace", target="bcrypt",
+                reason="보안 강화", replacement="argon2",
+            ),
+        )
+        assert evt.lesson is not None
+        assert evt.lesson.action == "replace"
+
+    def test_event_without_lesson(self):
+        evt = MemoryEvent(
+            id="evt_011",
+            repo_id="github.com/user/project",
+            user="dev_a",
+            ts="2026-03-28T10:00:00Z",
+            type="discovery",
+            result="found issue",
+        )
+        assert evt.lesson is None
