@@ -5,7 +5,7 @@
 Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시간 동기화하는 시스템이다.
 두 아티팩트: **Overmind Server** (Python, FastAPI + FastMCP) + **Overmind Plugin** (Claude Code 플러그인).
 
-## Current State: Phase 2 완료 (Phase 3 대기)
+## Current State: Phase 3 완료
 
 ### 완료된 것
 
@@ -34,9 +34,9 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 182+ pass
-- Server: 82개 (models 12 + store 14 + api 13 + mcp 6 + scenarios 28 + summary 2 + 기타)
-- Plugin: 100개 (api_client 20 + flush_logic 14 + formatter 13 + context_writer 8 + diff_collector 6 + conflict_detector 18 + hooks 11 + 기타)
+**Tests**: 204+ pass
+- Server: 88개 (models 12 + store 22 + api 13 + mcp 6 + scenarios 28 + summary 2 + 기타)
+- Plugin: 116개 (api_client 27 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 18 + hooks 11 + 기타)
 - E2E Live: 3개 시나리오 (AB, AB_multistage, AB_complex) — `claude` CLI 필요
 
 **Docs**:
@@ -80,19 +80,12 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 
 연구 문서: `docs/research/cross-agent-influence.md`
 
-**Phase 3: Branch-Aware Selective Intelligence (프로젝트 핵심 가치)**
-
-현재 구조는 로컬 변경(diff/lesson)을 무조건 push하지만, Overmind의 진짜 가치는
-같은 base branch에서 분기한 에이전트 간 **선택적 지식 공유**에 있다.
-- 중복 작업 방지: "이 문제 이미 다른 branch에서 해결 중"
-- 동일 실수 답습 방지: "base branch의 이 버그, 다른 branch도 밟을 수 있음"
-- 변경 충돌 예방: "이 모듈 구조 변경 예정, 의존하는 branch는 알아야 함"
-
-점진적 구현 단계:
-1. **Branch metadata**: MemoryEvent에 `current_branch`, `base_branch` 추가 (git 자동 감지)
-2. **이벤트 타입 분화**: `change` vs `discovery` (버그 발견) vs `intent` (향후 계획) — discovery/intent가 cross-branch 가치 높음
-3. **Pull relevance 판단**: 같은 base 분기 이벤트 필터 + 내가 건드리는 파일/모듈 겹침 우선순위
-4. **선택적 수용**: PreToolUse에서 관련 이벤트 context 제공, 에이전트가 수용/무시/질문 판단
+**Phase 3: Branch-Aware Selective Intelligence** ✅
+- ~~Branch metadata~~ ✅ `current_branch`/`base_branch` 자동 감지 (git) + MemoryEvent 필드 + DB 저장
+- ~~이벤트 타입 분화~~ ✅ `intent` 타입 추가 — cross-branch 가치 높은 forward-looking 선언
+- ~~Pull relevance 3-tier~~ ✅ same branch(all) > same base(intent/discovery/correction) > different(broadcast/high_priority only)
+- ~~선택적 수용~~ ✅ PreToolUse에서 branch context 제공, formatter PLANNED CHANGES 섹션
+- ~~Lesson 자동분류~~ ✅ lesson action → event type 매핑 (prohibit→correction, replace→decision, avoid→discovery)
 
 ## Tech Stack
 
@@ -109,7 +102,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 # Server
 cd server && uv sync --all-extras && uv run python -m overmind.main
 
-# Tests (server 82 + plugin 100)
+# Tests (server 88 + plugin 116)
 cd server && uv run pytest tests/ -v
 cd server && uv run pytest ../plugin/tests/ -v
 

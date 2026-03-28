@@ -37,12 +37,12 @@
 - [x] Scope 상대경로 정규화 (git root 기준)
 - [x] Formatter 사실적 표현 전환 (FIXES → TEAMMATE CHANGES)
 
-### Phase 3: Branch-Aware Selective Intelligence (미시작)
-- [ ] Branch metadata: MemoryEvent에 `current_branch`, `base_branch` 추가
-- [ ] 이벤트 타입 분화: `change` vs `discovery` vs `intent`
-- [ ] Pull relevance 판단: 같은 base 분기 + 파일/모듈 겹침 우선순위
-- [ ] 선택적 수용: PreToolUse에서 관련 이벤트 context 제공
-- [ ] PostToolUse lesson 필드 활용 (Phase 2-A에서 이관)
+### Phase 3: ✅ Branch-Aware Selective Intelligence (완료)
+- [x] Branch metadata: `current_branch`/`base_branch` 자동 감지 + DB 저장
+- [x] 이벤트 타입: `intent` 추가 (forward-looking 선언)
+- [x] Pull relevance 3-tier: same branch > same base > different base
+- [x] 선택적 수용: formatter PLANNED CHANGES + branch tag
+- [x] Lesson 자동분류: action → event type 매핑
 
 ---
 
@@ -50,22 +50,23 @@
 
 | 영역 | 수 | 내역 |
 |------|-----|------|
-| Server | 82 | models 12, store 14, api 13, mcp 6, scenarios 28, summary 2, 기타 |
-| Plugin | 100 | api_client 20, flush 14, formatter 13, context_writer 8, diff_collector 6, conflict_detector 18, hooks 11, 기타 |
+| Server | 88 | models 12, store 22, api 13, mcp 6, scenarios 28, summary 2, 기타 |
+| Plugin | 116 | api_client 27, flush 22, formatter 15, context_writer 8, diff_collector 6, conflict_detector 18, hooks 11, 기타 |
 | E2E Live | 3 시나리오 | AB, AB_multistage, AB_complex (`claude` CLI 필요) |
-| **합계** | **182+** | |
+| **합계** | **204+** | |
 
 ---
 
 ## 다음 세션 추천 작업
 
-### Phase 3 진입 전 정리
-1. **A/B 벤치마크 v2 실행 데이터 수집** — 8단계 캐스케이드 10회 반복 (haiku/sonnet)
-2. **영향 측정 메커니즘** — cross-agent 이벤트가 실제 agent 행동을 바꿨는지 검증
+### 검증 & 안정화
+1. **Branch-aware A/B 테스트** — 다른 branch에서 작업하는 2+ agent가 intent/discovery를 cross-branch로 공유하는지 E2E 검증
+2. **Dashboard branch 시각화** — Flow View에 branch 정보 표시, branch별 필터
+3. **실 환경 테스트** — 실제 multi-branch 개발 시나리오에서 selective pull 동작 확인
 
-### Phase 3 시작
-3. **Branch metadata** — git branch 자동 감지, MemoryEvent에 `current_branch`/`base_branch` 추가
-4. **Pull relevance 판단** — 같은 base branch 이벤트 필터링
+### 확장
+4. **overmind_intent MCP tool** — 명시적 intent push 전용 도구 (scope/files/description)
+5. **Branch merge 감지** — branch가 merge되면 해당 이벤트의 relevance 자동 조정
 
 ---
 
