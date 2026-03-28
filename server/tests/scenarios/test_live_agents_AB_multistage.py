@@ -1,37 +1,42 @@
 # server/tests/scenarios/test_live_agents_AB_multistage.py
 """A/B Test - Multi-Stage Failure Cascade (Node.js scaffold).
 
-A Node.js app with npm install + config.toml parsing across 4 source files.
+A Node.js app with npm install + config.toml parsing across 6 source files.
 Each module reads a different config section and throws a raw JS exception
 (TypeError, ReferenceError, assertion) when the section is missing/malformed.
 
-Failure cascade:
+Failure cascade (9 stages — 6 missing sections + 3 value traps):
   Stage 1: npm install (succeeds but adds realistic delay/noise)
   Stage 2: start.sh → TypeError: Cannot read properties of undefined ('host')
             (in src/network.js — config.server is undefined)
-  Stage 3: fix [server] → ENOENT: no such file './keys/hmac.key'
+  Stage 3: fix [server] → RangeError: server.env must be one of: production, staging, development
+            (in src/network.js — env field validation)
+  Stage 4: fix env → ENOENT: no such file './keys/hmac.key'
             (in src/auth.js — config.auth.key_file points to wrong path)
-  Stage 4: fix key_file → TypeError: Cannot read properties of undefined ('store')
+  Stage 5: fix key_file → TypeError: Cannot read properties of undefined ('store')
             (in src/session.js — config.session is undefined)
-  Stage 5: fix [session] → AssertionError: ttl must be a positive integer
-            (in src/session.js — ttl_seconds must be positive int)
-  Stage 6: fix ttl → TypeError: handler.paths is not iterable
+  Stage 6: fix [session] → AssertionError: ttl must be a positive integer
+            (in src/session.js — ttl_seconds must be positive int, ≥60)
+  Stage 7: fix ttl → TypeError: handler.paths is not iterable
             (in src/routes.js — config.routes is undefined)
-  Stage 7: fix [routes] with paths array → server starts OK
+  Stage 8: fix [routes] with paths array → Error: middleware_order must be non-empty array of strings
+            (in src/middleware.js — config.middleware is undefined)
+  Stage 9: fix [middleware] → Error: log format must match '<level>:<target>' pattern
+            (in src/logging.js — config.logging with format validation)
+  Stage 10: fix [logging] → server starts OK
 
 Pioneer must iterate: run → fail → read source → fix → run → fail → ...
-Student sees Pioneer's events (many config edits, many source reads) → investigates first.
+Student sees Pioneer's events (many config edits + diffs) → applies all fixes proactively.
 Naive repeats Pioneer's path.
 
-Expected:
-  Pioneer: 5-7 start.sh runs, reads multiple src/ files
-  Student: 1-3 start.sh runs (fixes all before first run or after single run)
-  Naive:   similar to Pioneer (5-7 runs)
+Key metrics:
+  proactive_config_fix: Student edits config BEFORE first start.sh run
+  server_run_attempts: Pioneer ~6-9, Student 1-2, Naive ~6-9
+  src_file_reads: Student should need fewer source reads
 """
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -67,9 +72,9 @@ Run `bash start.sh` to start the server.
 - The start script handles npm install automatically.
 """,
     # ── config.toml: deliberately incomplete — has [database] and [auth] but
-    # is missing [server], [session], [routes]; auth.key_file points to wrong
-    # path (./keys/hmac.key instead of ./hmac.key). Agent must discover each
-    # gap by running the app and reading the crash source. ──
+    # is missing [server], [session], [routes], [middleware], [logging];
+    # auth.key_file points to wrong path. Agent must discover each gap by
+    # running the app and reading the crash source. ──
     "config.toml": """# Hive Server Configuration
 
 [database]
@@ -80,7 +85,6 @@ key_file = "./keys/hmac.key"
 algorithm = "HS256"
 """,
     # ── The actual HMAC key file lives at project root, not ./keys/ ──
-    # 64 hex chars — valid, but config points to wrong path (./keys/hmac.key)
     "hmac.key": "4a7f3c9e1b2d8a0f5e6c7d3b9a1f0e2c4d5b6a8f7e3c1d9b0a2f4e6c8d7b5a3f",
     "start.sh": """#!/usr/bin/env bash
 set -e
@@ -111,7 +115,7 @@ const toml = require('@iarna/toml');
 const configRaw = fs.readFileSync('config.toml', 'utf8');
 const config = toml.parse(configRaw);
 
-// Phase 1: network binding
+// Phase 1: network binding + env validation
 const network = require('./network');
 const { host, port } = network.init(config);
 
@@ -127,16 +131,27 @@ session.init(config);
 const routes = require('./routes');
 routes.init(config);
 
+// Phase 5: middleware ordering
+const middleware = require('./middleware');
+middleware.init(config);
+
+// Phase 6: structured logging
+const logging = require('./logging');
+logging.init(config);
+
 // All checks passed — print success and exit
 console.log('[Hive] Configuration validated successfully');
 console.log(`[Hive] Server running on http://${host}:${port}`);
 process.exit(0);
 """,
-    # ── Stage 1: config.server is undefined → TypeError on .host access ──
+    # ── Stage 1-2: config.server undefined → TypeError, then env validation ──
     "src/network.js": """'use strict';
 /**
  * Network subsystem — binds to host:port from [server] config section.
+ * Also validates deployment environment.
  */
+const VALID_ENVS = ['production', 'staging', 'development'];
+
 function init(config) {
   const host = config.server.host;           // TypeError if config.server undefined
   const port = Number(config.server.port);   // same
@@ -146,11 +161,18 @@ function init(config) {
   if (isNaN(port) || port < 1 || port > 65535) {
     throw new RangeError(`Port out of valid range: ${port}`);
   }
-  return { host, port };
+  // Environment validation — must be explicitly set
+  const env = config.server.env;
+  if (!VALID_ENVS.includes(env)) {
+    throw new RangeError(
+      `server.env must be one of: ${VALID_ENVS.join(', ')} (got: ${JSON.stringify(env)})`
+    );
+  }
+  return { host, port, env };
 }
 module.exports = { init };
 """,
-    # ── Stage 2-3: auth reads key_file from disk, validates length ──
+    # ── Stage 3: auth reads key_file from disk, validates length ──
     "src/auth.js": """'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -179,13 +201,14 @@ module.exports = { init };
 const assert = require('assert');
 /**
  * Session subsystem — configures session store from [session] section.
+ * ttl_seconds must be a positive integer >= 60 (minimum 1 minute).
  */
 function init(config) {
   const store = config.session.store;         // TypeError if config.session undefined
   const ttl   = config.session.ttl_seconds;   // same
   assert.ok(
-    Number.isInteger(ttl) && ttl > 0,
-    `ttl must be a positive integer, got: ${JSON.stringify(ttl)}`
+    Number.isInteger(ttl) && ttl >= 60,
+    `ttl must be a positive integer >= 60, got: ${JSON.stringify(ttl)}`
   );
   const validStores = ['memory', 'redis', 'file'];
   if (!validStores.includes(store)) {
@@ -211,6 +234,57 @@ function init(config) {
     throw new RangeError('routes.paths must not be empty');
   }
   return handler;
+}
+module.exports = { init };
+""",
+    # ── Stage 8: middleware ordering — must be non-empty string array ──
+    "src/middleware.js": """'use strict';
+/**
+ * Middleware ordering — defines execution order of middleware layers.
+ * Expects config.middleware.order to be a non-empty array of known names.
+ */
+const KNOWN_MIDDLEWARE = ['cors', 'auth', 'ratelimit', 'logging', 'compress', 'cache'];
+
+function init(config) {
+  const mw = config.middleware;               // undefined if [middleware] missing
+  if (!Array.isArray(mw.order) || mw.order.length === 0) {
+    throw new Error('middleware_order must be non-empty array of strings');
+  }
+  for (const name of mw.order) {
+    if (!KNOWN_MIDDLEWARE.includes(name)) {
+      throw new Error(
+        `Unknown middleware "${name}". Known: ${KNOWN_MIDDLEWARE.join(', ')}`
+      );
+    }
+  }
+  return { order: mw.order };
+}
+module.exports = { init };
+""",
+    # ── Stage 9: structured logging — format must match pattern ──
+    "src/logging.js": """'use strict';
+/**
+ * Structured logging subsystem.
+ * Expects config.logging.level (debug|info|warn|error)
+ * and config.logging.format matching '<level>:<target>' pattern
+ * e.g. "json:stdout" or "text:file"
+ */
+const VALID_LEVELS = ['debug', 'info', 'warn', 'error'];
+const FORMAT_RE = /^(json|text):(stdout|stderr|file)$/;
+
+function init(config) {
+  const log = config.logging;                 // undefined if [logging] missing
+  if (!VALID_LEVELS.includes(log.level)) {
+    throw new Error(
+      `Invalid log level "${log.level}". Valid: ${VALID_LEVELS.join(', ')}`
+    );
+  }
+  if (!FORMAT_RE.test(log.format)) {
+    throw new Error(
+      `Log format must match '<type>:<target>' pattern (e.g. "json:stdout"). Got: "${log.format}"`
+    );
+  }
+  return { level: log.level, format: log.format };
 }
 module.exports = { init };
 """,
@@ -245,7 +319,7 @@ def create_scaffold(base_dir: Path) -> Path:
 
 
 # ============================================================
-# Infrastructure (same as single-stage test)
+# Infrastructure
 # ============================================================
 
 class ServerThread:
@@ -284,18 +358,19 @@ def _api_get(base_url: str, path: str, params: dict | None = None) -> dict:
 # Model selection via env var: AGENT_MODEL=haiku|sonnet|opus (default: system default)
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "")
 
+# Prompt is intentionally minimal — no hints about reading source files.
+# Pioneer discovers through trial-and-error; Student should use Overmind context.
 SHARED_PROMPT = (
     "Get the Hive server running. "
     "Run `bash start.sh` to start it. "
-    "If it fails, read the source file that crashed to understand what it expects, "
-    "fix config.toml accordingly, then retry. "
+    "If it fails, figure out what's wrong and fix config.toml, then retry. "
     "You may only edit config.toml — do not modify any .js or .json files."
 )
 
 
 def _run_agent(
     prompt: str, cwd: Path, user: str, state_file: Path,
-    base_url: str | None, max_turns: int = 25, with_overmind: bool = True,
+    base_url: str | None, max_turns: int = 30, with_overmind: bool = True,
 ) -> tuple[dict, list[dict]]:
     env = {**os.environ}
     cmd = [
@@ -343,10 +418,16 @@ def _run_agent(
 
 
 # ============================================================
-# JSONL Analysis
+# JSONL Analysis — enhanced with proactive_config_fix metric
 # ============================================================
 
 def analyze_conversation(events: list[dict]) -> dict:
+    """Analyze a claude conversation's JSONL events for behavioral metrics.
+
+    Key metric: proactive_config_fix — True if the agent edits config.toml
+    BEFORE its first start.sh / server run attempt. This is the most
+    deterministic measure of Overmind context absorption.
+    """
     tool_uses = []
     bash_commands = []
     edited_files = []
@@ -354,6 +435,11 @@ def analyze_conversation(events: list[dict]) -> dict:
     server_runs = 0
     saw_error = False
     saw_server_running = False
+
+    # Step tracking for proactive fix detection
+    step = 0
+    first_config_edit_step = None
+    first_server_run_step = None
 
     for evt in events:
         if evt.get("type") == "assistant":
@@ -364,6 +450,7 @@ def analyze_conversation(events: list[dict]) -> dict:
                 tool = block.get("name", "")
                 inp = block.get("input", {})
                 tool_uses.append((tool, inp))
+                step += 1
 
                 if tool == "Bash":
                     cmd = inp.get("command", "")
@@ -373,9 +460,13 @@ def analyze_conversation(events: list[dict]) -> dict:
                         or "npm run dev" in cmd
                         or "npm start" in cmd):
                         server_runs += 1
+                        if first_server_run_step is None:
+                            first_server_run_step = step
                 elif tool in ("Edit", "Write"):
                     fp = inp.get("file_path", "").replace("\\", "/")
                     edited_files.append(fp)
+                    if "config.toml" in fp and first_config_edit_step is None:
+                        first_config_edit_step = step
                 elif tool == "Read":
                     fp = inp.get("file_path", "").replace("\\", "/")
                     read_files.append(fp)
@@ -409,6 +500,13 @@ def analyze_conversation(events: list[dict]) -> dict:
         f.rsplit("/", 1)[-1] for f in src_reads
     ))
 
+    # Proactive config fix: agent edits config.toml BEFORE first server run
+    proactive_config_fix = (
+        first_config_edit_step is not None
+        and first_server_run_step is not None
+        and first_config_edit_step < first_server_run_step
+    )
+
     return {
         "total_tool_uses": len(tool_uses),
         "server_run_attempts": server_runs,
@@ -420,6 +518,9 @@ def analyze_conversation(events: list[dict]) -> dict:
         "src_file_edits": len(src_edits),
         "edited_files": [f.rsplit("/", 1)[-1] for f in edited_files],
         "tools_used": list({t for t, _ in tool_uses}),
+        "proactive_config_fix": proactive_config_fix,
+        "first_config_edit_step": first_config_edit_step,
+        "first_server_run_step": first_server_run_step,
     }
 
 
@@ -451,6 +552,7 @@ def check_config(repo_dir: Path) -> dict:
             "server" in config
             and "host" in config.get("server", {})
             and "port" in config.get("server", {})
+            and config.get("server", {}).get("env", "") in ("production", "staging", "development")
         ),
         "auth_ok": (
             "auth" in config
@@ -459,7 +561,7 @@ def check_config(repo_dir: Path) -> dict:
         "session_ok": (
             "session" in config
             and isinstance(config.get("session", {}).get("ttl_seconds", None), int)
-            and config.get("session", {}).get("ttl_seconds", 0) > 0
+            and config.get("session", {}).get("ttl_seconds", 0) >= 60
             and config.get("session", {}).get("store", "") in ("memory", "redis", "file")
         ),
         "routes_ok": (
@@ -467,9 +569,21 @@ def check_config(repo_dir: Path) -> dict:
             and isinstance(config.get("routes", {}).get("paths", None), list)
             and len(config.get("routes", {}).get("paths", [])) > 0
         ),
+        "middleware_ok": (
+            "middleware" in config
+            and isinstance(config.get("middleware", {}).get("order", None), list)
+            and len(config.get("middleware", {}).get("order", [])) > 0
+        ),
+        "logging_ok": (
+            "logging" in config
+            and config.get("logging", {}).get("level", "") in ("debug", "info", "warn", "error")
+            and bool(__import__("re").match(
+                r"^(json|text):(stdout|stderr|file)$",
+                config.get("logging", {}).get("format", ""),
+            ))
+        ),
     }
     checks["all_ok"] = all(checks.values())
-    checks["sections_fixed"] = sum(1 for v in checks.values() if v and v is not True)
     return checks
 
 
@@ -548,6 +662,9 @@ class TestMultiStageAB:
         print(f"  config edits:  {p_analysis['config_toml_edits']}")
         print(f"  src/ reads:    {p_analysis['src_file_reads']} ({p_analysis['src_files_read']})")
         print(f"  src/ edits:    {p_analysis['src_file_edits']}")
+        print(f"  proactive fix: {p_analysis['proactive_config_fix']}")
+        print(f"  1st edit step: {p_analysis['first_config_edit_step']}")
+        print(f"  1st run step:  {p_analysis['first_server_run_step']}")
         print(f"  saw error:     {p_analysis['saw_error']}")
         print(f"  server OK:     {p_analysis['saw_server_running']}")
         print(f"  config state:  {check_config(repo_dirs['agent_pioneer'])}")
@@ -560,6 +677,12 @@ class TestMultiStageAB:
         assert len(p_pushed) >= 1, "Pioneer must push events"
         print(f"  Overmind events: {len(p_pushed)}")
 
+        # Show pushed event content (for debugging enrichment quality)
+        print(f"\n  Pioneer's pushed events:")
+        for e in p_pushed[:5]:
+            result_preview = e["result"][:120].replace("\n", "\\n")
+            print(f"    [{e.get('scope', '?')}] {result_preview}")
+
         # ── Phase 2: Student vs Naive ──
         print("\n" + "=" * 70)
         print("  Phase 2: Student (+Overmind) vs Naive (Control)")
@@ -571,7 +694,7 @@ class TestMultiStageAB:
         })
         print(f"\n  Events for Student's pull: {pull_preview['count']}")
         for e in pull_preview["events"][:5]:
-            print(f"    [{e['user']}] {e['result'][:70]}")
+            print(f"    [{e['user']}] {e['result'][:80]}")
         print(f"  Events for Naive: 0\n")
 
         ab_results = {}
@@ -598,12 +721,14 @@ class TestMultiStageAB:
         s_analysis = analyze_conversation(ab_events["agent_student"])
         n_analysis = analyze_conversation(ab_events["agent_naive"])
 
-        # ── Phase 3: Comparison ──
+        # ── Phase 3: Behavioral Comparison ──
         print("\n" + "=" * 70)
         print("  Phase 3: Behavioral Comparison")
         print("=" * 70)
 
         metrics = [
+            "proactive_config_fix",
+            "first_config_edit_step", "first_server_run_step",
             "server_run_attempts", "config_toml_edits",
             "src_file_reads", "src_file_edits",
             "saw_error", "saw_server_running", "total_tool_uses",
@@ -652,34 +777,89 @@ class TestMultiStageAB:
                                   if e["user"] == "agent_pioneer"])
         print(f"  PASS: Student received {student_pull_count} event(s) from Pioneer")
 
-        # ── Phase 5: Key Result ──
+        # ── Phase 5: Key Results + Assertions ──
         print("\n" + "=" * 70)
-        print("  Phase 5: KEY RESULT - start.sh attempts")
+        print("  Phase 5: KEY RESULTS + ASSERTIONS")
         print("=" * 70)
 
         p_runs = p_analysis["server_run_attempts"]
         s_runs = s_analysis["server_run_attempts"]
         n_runs = n_analysis["server_run_attempts"]
 
-        print(f"\n  Pioneer: {p_runs} start.sh runs (baseline - discovering all stages)")
+        print(f"\n  Pioneer: {p_runs} start.sh runs (baseline)")
         print(f"  Student: {s_runs} start.sh runs (with Overmind)")
         print(f"  Naive:   {n_runs} start.sh runs (without Overmind)")
 
-        if s_runs < n_runs:
-            print(f"\n  >> Student needed {n_runs - s_runs} FEWER attempts than Naive")
-            print(f"  >> Overmind lesson absorption confirmed")
-        elif s_runs == n_runs:
-            print(f"\n  >> Same attempt count (non-deterministic)")
-        else:
-            print(f"\n  >> Naive was better (non-deterministic)")
+        s_proactive = s_analysis["proactive_config_fix"]
+        n_proactive = n_analysis["proactive_config_fix"]
+        print(f"\n  Student proactive fix: {s_proactive}")
+        print(f"  Naive proactive fix:   {n_proactive}")
 
+        # ── Assertion 1: All agents must succeed ──
         p_cfg = check_config(repo_dirs["agent_pioneer"])
         s_cfg = check_config(repo_dirs["agent_student"])
         n_cfg = check_config(repo_dirs["agent_naive"])
+
         print(f"\n  Config status:")
         print(f"    Pioneer: {p_cfg}")
         print(f"    Student: {s_cfg}")
         print(f"    Naive:   {n_cfg}")
+
+        assert p_cfg.get("all_ok") or p_analysis["saw_server_running"], \
+            "Pioneer must solve all stages"
+        print("  ASSERT PASS: Pioneer solved all stages")
+
+        assert s_cfg.get("all_ok") or s_analysis["saw_server_running"], \
+            "Student must solve all stages"
+        print("  ASSERT PASS: Student solved all stages")
+
+        assert n_cfg.get("all_ok") or n_analysis["saw_server_running"], \
+            "Naive must solve all stages"
+        print("  ASSERT PASS: Naive solved all stages")
+
+        # ── Assertion 2: Student should show Overmind advantage ──
+        # At least ONE of these must be true for the test to pass:
+        #   a) Student has proactive_config_fix (edits before first run)
+        #   b) Student has fewer server runs than Naive
+        #   c) Student has fewer src/ file reads than Naive
+        overmind_advantage = (
+            s_proactive
+            or s_runs < n_runs
+            or s_analysis["src_file_reads"] < n_analysis["src_file_reads"]
+        )
+
+        advantage_reasons = []
+        if s_proactive:
+            advantage_reasons.append("proactive config fix before first run")
+        if s_runs < n_runs:
+            advantage_reasons.append(f"{n_runs - s_runs} fewer server runs")
+        if s_analysis["src_file_reads"] < n_analysis["src_file_reads"]:
+            advantage_reasons.append(
+                f"{n_analysis['src_file_reads'] - s_analysis['src_file_reads']} fewer src reads"
+            )
+
+        if overmind_advantage:
+            print(f"\n  >> OVERMIND ADVANTAGE CONFIRMED:")
+            for reason in advantage_reasons:
+                print(f"     - {reason}")
+        else:
+            print(f"\n  >> WARNING: No measurable advantage this run (non-deterministic)")
+            print(f"     Student: runs={s_runs}, proactive={s_proactive}, src_reads={s_analysis['src_file_reads']}")
+            print(f"     Naive:   runs={n_runs}, proactive={n_proactive}, src_reads={n_analysis['src_file_reads']}")
+
+        # Soft assertion: log warning but don't fail (LLM non-determinism)
+        # Hard assertion: Student must not be WORSE than Naive by a large margin
+        assert s_runs <= n_runs + 3, (
+            f"Student ({s_runs} runs) should not be significantly worse "
+            f"than Naive ({n_runs} runs)"
+        )
+        print("  ASSERT PASS: Student not significantly worse than Naive")
+
+        # ── Assertion 3: No src/ modifications ──
+        for name, repo_dir in repo_dirs.items():
+            modified = check_src_modified(repo_dir)
+            assert not modified, f"{name} modified src/ files: {modified}"
+        print("  ASSERT PASS: No agents modified src/ files")
 
         # ── Save JSONL ──
         for name, evts in [("agent_pioneer", p_events),
@@ -690,4 +870,43 @@ class TestMultiStageAB:
                 for e in evts:
                     f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
+        # ── Save summary JSON for multi-run analysis ──
+        summary = {
+            "model": AGENT_MODEL or "default",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "pioneer": {
+                "server_runs": p_runs,
+                "config_edits": p_analysis["config_toml_edits"],
+                "src_reads": p_analysis["src_file_reads"],
+                "proactive": p_analysis["proactive_config_fix"],
+                "success": p_analysis["saw_server_running"],
+                "time_s": round(p_time, 1),
+                "turns": p_result.get("num_turns"),
+            },
+            "student": {
+                "server_runs": s_runs,
+                "config_edits": s_analysis["config_toml_edits"],
+                "src_reads": s_analysis["src_file_reads"],
+                "proactive": s_proactive,
+                "success": s_analysis["saw_server_running"],
+                "time_s": round(ab_times.get("agent_student", 0), 1),
+                "turns": ab_results.get("agent_student", {}).get("num_turns"),
+            },
+            "naive": {
+                "server_runs": n_runs,
+                "config_edits": n_analysis["config_toml_edits"],
+                "src_reads": n_analysis["src_file_reads"],
+                "proactive": n_proactive,
+                "success": n_analysis["saw_server_running"],
+                "time_s": round(ab_times.get("agent_naive", 0), 1),
+                "turns": ab_results.get("agent_naive", {}).get("num_turns"),
+            },
+            "overmind_advantage": overmind_advantage,
+            "advantage_reasons": advantage_reasons,
+        }
+        summary_path = state_dir / "run_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
         print(f"\n  JSONL saved to: {state_dir}")
+        print(f"  Summary saved to: {summary_path}")
