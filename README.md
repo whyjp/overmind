@@ -36,7 +36,7 @@ uv run python -m overmind.main
 
 | 자동 설정 항목 | 내용 |
 |-------------|------|
-| **Hooks** | SessionStart(pull), SessionEnd(push), PreToolUse(scope 경고/차단) |
+| **Hooks** | SessionStart(pull), PostToolUse(변경 누적+push), PreToolUse(scope 경고/차단), SessionEnd(잔여 flush) |
 | **MCP** | overmind_push, overmind_pull, overmind_broadcast 도구 |
 | **Skills** | overmind-broadcast, overmind-report |
 | **Commands** | /overmind:broadcast |
@@ -68,30 +68,47 @@ Agent A 작업 → 세션 종료 → Agent B 세션 시작 시 Agent A의 이벤
 ## A/B Benchmark: Cross-Agent Lesson Sharing
 
 3개의 동일한 Claude 에이전트에게 같은 프롬프트(`bash start.sh`로 서버를 실행하라)를 주고,
-**Overmind 연결 여부만 다르게** 설정한 A/B 테스트 결과:
+**Overmind 연결 여부만 다르게** 설정한 A/B 테스트.
+
+### 테스트 설계
+
+Node.js 서버가 **6개 모듈, 8단계 캐스케이드**로 순차적 에러를 발생시킨다:
 
 ```
-                    Pioneer       Student (+OM)     Naive (Control)
-                    ────────      ─────────────     ───────────────
-start.sh 실행           5               2                 5
-config.toml 수정        3               1                 4
-총 turns               16              12                17
-시간 (s)             45.6            36.5              49.8
+server.js → network.js([server] + env) → auth.js(key_file) → session.js([session] + ttl≥60)
+          → routes.js([routes].paths) → middleware.js([middleware].order) → logging.js(format 패턴)
 ```
 
-Node.js 서버가 4개 모듈에서 **순차적으로 다른 에러**를 발생시키는 시나리오.
-Pioneer와 Naive는 **실행 -> 실패 -> 소스 분석 -> 수정**을 5회 반복했다.
+Pioneer와 Naive는 **실행 → 실패 → 분석 → 수정**을 6-9회 반복해야 한다.
+Student는 Overmind에서 Pioneer의 **diff-enriched 이벤트**를 수신한 후 선제적으로 적용한다.
 
-Student는 Overmind에서 Pioneer의 이벤트를 수신한 후,
-**첫 실패에서 전체 소스를 선행 분석 -> 1회 수정으로 완성 -> 2번째 실행에 성공**.
+### 핵심 지표: 선제적 수정 (proactive_config_fix)
 
 ```
-Pioneer/Naive:  start.sh → fail → read 1 file → fix → start.sh → fail → read 1 file → fix → ...
-Student:        start.sh → fail → read ALL files → fix everything → start.sh → done
+Pioneer/Naive:  start.sh → fail → read src → fix → start.sh → fail → ...  (6-9 사이클)
+Student:        [Overmind FIXES 수신] → config.toml 선제 수정 → start.sh → done  (1-2 사이클)
 ```
 
-> **한 에이전트의 시행착오가 다른 에이전트의 선행 분석을 유도한다.**
-> 실행 횟수 60% 감소, config 수정 75% 감소.
+| 지표 | Pioneer | Student (+OM) | Naive | Student vs Naive |
+|------|:-------:|:-------------:|:-----:|:----------------:|
+| **선제적 수정** | No | **Yes** | No | 결정적 차이 |
+| **start.sh 실행** | 6-9 | **1-2** | 6-9 | **~75% 감소** |
+| **src/ 파일 분석** | 다수 | **최소** | 다수 | diff에서 획득 |
+
+> **한 에이전트의 시행착오(diff)가 다른 에이전트의 선제적 수정을 유도한다.**
+> 핵심은 "무엇을 고쳤는가"(what)가 아니라 "어떻게 고쳤는가"(diff)의 전파.
+
+### Overmind가 전달하는 것
+
+```
+FIXES BY TEAMMATES — Another agent already solved these problems.
+Apply these fixes BEFORE running or testing the project:
+- Modified config.toml (1 file)
+  Diff: +[server]\n+host = "0.0.0.0"\n+port = 3000\n+env = "development"
+- Modified config.toml (1 file)
+  Diff: +[session]\n+store = "memory"\n+ttl_seconds = 3600
+  ...
+```
 
 상세 결과와 JSONL 분석: [`docs/benchmark-ab-test.md`](docs/benchmark-ab-test.md)
 
@@ -99,6 +116,7 @@ Student:        start.sh → fail → read ALL files → fix everything → star
 ```bash
 cd server
 AGENT_MODEL=haiku uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
+AGENT_MODEL=sonnet uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
 ```
 
 ---
@@ -109,9 +127,10 @@ AGENT_MODEL=haiku uv run pytest tests/scenarios/test_live_agents_AB_multistage.p
 
 | 시점 | 동작 |
 |------|------|
-| **세션 시작** | 팀 이벤트를 pull → RULES/CONTEXT/ANNOUNCEMENTS로 분류 → Claude에 지시형 프롬프트 주입 |
-| **파일 수정 시** | scope 관련 이벤트 pull → urgent correction이면 **편집 차단**, 그 외 경고 |
-| **세션 종료** | 세션 중 주요 이벤트를 자동 push |
+| **세션 시작** | 팀 이벤트를 pull → RULES/FIXES/CONTEXT/ANNOUNCEMENTS로 분류 → Claude에 지시형 프롬프트 주입 |
+| **파일 수정 후** | 변경 파일을 state에 누적 → 개수/시간/스코프 전환 시 diff-enriched 이벤트를 batch push |
+| **파일 수정 전** | scope 관련 이벤트 pull → urgent correction이면 **편집 차단**, 그 외 경고 |
+| **세션 종료** | 잔여 pending changes flush push |
 
 ### Architecture
 
@@ -249,8 +268,9 @@ curl -X POST http://localhost:7777/api/memory/broadcast \
 ```bash
 cd server && uv sync --all-extras
 
-# Run tests (44 tests)
-uv run pytest tests/ -v
+# Run tests (110+ tests)
+uv run pytest tests/ -v        # server 61 tests
+cd ../plugin && python -m pytest tests/ -v  # plugin 80+ tests
 
 # Run server
 uv run python -m overmind.main --port 7778
@@ -263,7 +283,7 @@ overmind/
 ├── server/                    # Overmind Server
 │   ├── overmind/
 │   │   ├── models.py          # Pydantic models
-│   │   ├── store.py           # JSONL store + scope index
+│   │   ├── store.py           # SQLite store + scope filter
 │   │   ├── api.py             # FastAPI REST endpoints
 │   │   ├── mcp_server.py      # FastMCP wrapper
 │   │   ├── main.py            # Entry point (REST + MCP + Dashboard)
@@ -289,7 +309,7 @@ overmind/
 | Component | Technology |
 |-----------|-----------|
 | Server | Python 3.11+, FastAPI, FastMCP v3, Pydantic v2 |
-| Storage | File-based JSONL (Phase 2: SQLite) |
+| Storage | SQLite (aiosqlite) |
 | Dashboard | Vanilla JS, D3.js v7 |
 | Plugin | Python (urllib, no dependencies) |
 | Tests | pytest, pytest-asyncio, httpx, FastMCP in-memory client |
