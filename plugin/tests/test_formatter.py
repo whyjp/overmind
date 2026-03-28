@@ -69,10 +69,10 @@ class TestFormatSessionStart:
     def test_footer_present(self):
         events = [{"type": "discovery", "user": "dev_a", "result": "something", "priority": "normal"}]
         msg = format_session_start(events)
-        assert "Follow RULES strictly" in msg
+        assert "CONTEXT" in msg
 
-    def test_change_with_diff_in_fixes_section(self):
-        """Events containing diffs should appear in FIXES section, not CONTEXT."""
+    def test_change_with_diff_in_teammate_changes(self):
+        """Events containing diffs should appear in TEAMMATE CHANGES section."""
         events = [{
             "type": "change",
             "user": "pioneer",
@@ -80,10 +80,9 @@ class TestFormatSessionStart:
             "priority": "normal",
         }]
         msg = format_session_start(events)
-        assert "FIXES BY TEAMMATES" in msg
-        assert "CONTEXT — Be aware" not in msg  # No passive CONTEXT section
+        assert "TEAMMATE CHANGES" in msg
         assert "+[server]" in msg
-        assert "apply all" in msg.lower()
+        assert "pioneer" in msg
 
     def test_change_without_diff_in_context_section(self):
         """Events without diffs should stay in CONTEXT section."""
@@ -95,9 +94,9 @@ class TestFormatSessionStart:
         }]
         msg = format_session_start(events)
         assert "CONTEXT" in msg
-        assert "FIXES BY TEAMMATES" not in msg
+        assert "TEAMMATE CHANGES — What" not in msg  # No TEAMMATE CHANGES header section
 
-    def test_mixed_fixes_and_context(self):
+    def test_mixed_changes_and_context(self):
         """Events with and without diffs should be separated."""
         events = [
             {
@@ -112,20 +111,23 @@ class TestFormatSessionStart:
             },
         ]
         msg = format_session_start(events)
-        assert "FIXES BY TEAMMATES" in msg
+        assert "TEAMMATE CHANGES" in msg
         assert "CONTEXT" in msg
-        assert "IMPORTANT:" in msg
 
-    def test_footer_with_fixes_has_apply_instruction(self):
-        """When fixes exist, footer should emphasize applying them all at once."""
+    def test_no_prescriptive_instructions(self):
+        """Formatter should NOT contain prescriptive action instructions."""
         events = [{
             "type": "change", "user": "pioneer",
             "result": "Fixed config\nDiff:\n+key = value",
             "priority": "normal",
         }]
         msg = format_session_start(events)
-        assert "apply all fixes" in msg.lower()
-        assert "re-discover" in msg
+        # Should NOT contain prescriptive phrases
+        assert "Apply all" not in msg
+        assert "BEFORE running" not in msg
+        assert "fix everything at once" not in msg
+        # Should contain neutral presentation
+        assert "TEAMMATE CHANGES" in msg
 
 
 class TestFormatPreToolUse:
@@ -155,33 +157,25 @@ class TestFormatPreToolUse:
         msg = format_pre_tool_use(events, "src/auth/*")
         assert "src/auth/*" in msg
 
-    def test_diff_event_in_fixes_section(self):
-        """PreToolUse should show events with diffs as FIXES."""
+    def test_diff_event_in_teammate_changes(self):
+        """PreToolUse should show events with diffs as TEAMMATE CHANGES."""
         events = [{
             "type": "change", "user": "pioneer",
             "result": "Modified config.toml\nDiff:\n+[server]\n+port = 3000",
             "priority": "normal",
         }]
         msg = format_pre_tool_use(events, "*")
-        assert "FIXES BY TEAMMATES" in msg
+        assert "TEAMMATE CHANGES" in msg
         assert "+[server]" in msg
-        assert "ALL" in msg
 
-    def test_diff_event_apply_all_instruction(self):
-        """PreToolUse FIXES should tell agent to fix everything at once."""
-        events = [
-            {
-                "type": "change", "user": "pioneer",
-                "result": "Modified config.toml\nDiff:\n+[server]\n+port = 3000",
-                "priority": "normal",
-            },
-            {
-                "type": "change", "user": "pioneer",
-                "result": "Modified config.toml\nDiff:\n+[session]\n+store = memory",
-                "priority": "normal",
-            },
-        ]
+    def test_pre_tool_use_no_prescriptive_instructions(self):
+        """PreToolUse should NOT contain prescriptive action instructions."""
+        events = [{
+            "type": "change", "user": "pioneer",
+            "result": "Modified config.toml\nDiff:\n+[server]\n+port = 3000",
+            "priority": "normal",
+        }]
         msg = format_pre_tool_use(events, "*")
-        assert "FIXES BY TEAMMATES" in msg
-        assert "IMPORTANT" in msg
-        assert "single edit" in msg.lower() or "ALL fixes" in msg
+        assert "Apply ALL" not in msg
+        assert "single edit" not in msg
+        assert "TEAMMATE CHANGES" in msg

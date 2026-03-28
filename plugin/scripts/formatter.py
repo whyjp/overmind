@@ -1,4 +1,9 @@
-"""Format pulled Overmind events into instructional systemMessage prompts."""
+"""Format pulled Overmind events into systemMessage prompts.
+
+Design principle: Present FACTS, not instructions. The formatter tells the agent
+what other agents did (including diffs), but does NOT prescribe what to do with
+that information. The agent should naturally use the context to work more efficiently.
+"""
 
 from __future__ import annotations
 
@@ -16,16 +21,16 @@ def _has_diff(result: str) -> bool:
 
 
 def format_session_start(events: list[dict]) -> str | None:
-    """Format events for SessionStart hook — full instructional prompt.
+    """Format events for SessionStart hook — full context prompt.
 
-    Events with diffs are presented as actionable FIXES that the agent
-    should apply proactively. Events without diffs remain informational.
+    Events are categorized by type. Diff-containing events are separated as
+    TEAMMATE CHANGES for visibility, but no behavioral instructions are given.
     """
     if not events:
         return None
 
     rules = []
-    fixes = []
+    changes = []
     context = []
     broadcasts = []
 
@@ -42,14 +47,12 @@ def format_session_start(events: list[dict]) -> str | None:
 
         if etype in RULE_TYPES:
             rules.append(entry)
-            # Include reasoning for corrections/decisions
             for step in process[:2]:
                 rules.append(f"  Reason: {step}")
         elif etype == BROADCAST_TYPE:
             broadcasts.append(entry)
         elif _has_diff(result):
-            # Events with diffs are actionable teammate fixes
-            fixes.append(entry)
+            changes.append(entry)
         else:
             context.append(entry)
 
@@ -61,17 +64,13 @@ def format_session_start(events: list[dict]) -> str | None:
         lines.extend(rules)
         lines.append("")
 
-    if fixes:
-        lines.append(
-            "FIXES BY TEAMMATES — Another agent already solved these problems. "
-            "If you encounter errors, apply ALL of these diffs at once instead of "
-            "fixing one issue at a time:"
-        )
-        lines.extend(fixes)
+    if changes:
+        lines.append("TEAMMATE CHANGES — What other agents changed (with diffs):")
+        lines.extend(changes)
         lines.append("")
 
     if context:
-        lines.append("CONTEXT — Be aware of these when relevant:")
+        lines.append("CONTEXT — Other activity on this repo:")
         lines.extend(context)
         lines.append("")
 
@@ -80,31 +79,24 @@ def format_session_start(events: list[dict]) -> str | None:
         lines.extend(broadcasts)
         lines.append("")
 
-    if fixes:
-        lines.append(
-            "IMPORTANT: When you hit an error, apply ALL fixes above at once — "
-            "do NOT re-discover issues that teammates already solved. "
-            "Follow RULES strictly. Use CONTEXT to inform decisions."
-        )
-    else:
-        lines.append(
-            "Follow RULES strictly. Use CONTEXT to inform decisions when relevant."
-        )
+    lines.append(
+        "Follow RULES strictly. Use TEAMMATE CHANGES and CONTEXT to inform your decisions."
+    )
 
     return "\n".join(lines)
 
 
 def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
-    """Format events for PreToolUse hook — scope-specific warnings.
+    """Format events for PreToolUse hook — scope-specific context.
 
-    Events with diffs are shown as FIXES — the agent should apply all of them
-    at once instead of discovering issues one by one.
+    Shows what other agents did in this scope. Diff-containing events are
+    shown as TEAMMATE CHANGES for visibility.
     """
     if not events:
         return None
 
     rules = []
-    fixes = []
+    changes = []
     warnings = []
 
     for evt in events:
@@ -117,7 +109,7 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
             prefix = "[HIGH PRIORITY] " if priority == "high_priority" else ""
             rules.append(f"- {prefix}{result} (by {user})")
         elif _has_diff(result):
-            fixes.append(f"- {result} (by {user})")
+            changes.append(f"- {result} (by {user})")
         else:
             warnings.append(f"- {result} (by {user})")
 
@@ -129,12 +121,9 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
         lines.extend(rules)
         lines.append("")
 
-    if fixes:
-        lines.append(
-            "FIXES BY TEAMMATES — Apply ALL of these diffs in this edit. "
-            "Do not fix only the current error; fix everything at once:"
-        )
-        lines.extend(fixes)
+    if changes:
+        lines.append("TEAMMATE CHANGES for this scope (with diffs):")
+        lines.extend(changes)
         lines.append("")
 
     if warnings:
@@ -142,12 +131,6 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
         lines.extend(warnings)
         lines.append("")
 
-    if fixes:
-        lines.append(
-            "IMPORTANT: Apply ALL fixes above in a single edit — "
-            "another agent already discovered and solved these problems."
-        )
-    else:
-        lines.append("Check these before making changes to this scope.")
+    lines.append("Consider this context before making changes to this scope.")
 
     return "\n".join(lines)
