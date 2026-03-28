@@ -71,6 +71,62 @@ class TestFormatSessionStart:
         msg = format_session_start(events)
         assert "Follow RULES strictly" in msg
 
+    def test_change_with_diff_in_fixes_section(self):
+        """Events containing diffs should appear in FIXES section, not CONTEXT."""
+        events = [{
+            "type": "change",
+            "user": "pioneer",
+            "result": "Modified config.toml (1 file: config.toml)\nDiff:\n+[server]\n+host = \"0.0.0.0\"\n+port = 3000",
+            "priority": "normal",
+        }]
+        msg = format_session_start(events)
+        assert "FIXES BY TEAMMATES" in msg
+        assert "CONTEXT — Be aware" not in msg  # No passive CONTEXT section
+        assert "+[server]" in msg
+        assert "Apply" in msg
+
+    def test_change_without_diff_in_context_section(self):
+        """Events without diffs should stay in CONTEXT section."""
+        events = [{
+            "type": "change",
+            "user": "pioneer",
+            "result": "Modified config.toml (1 file: config.toml)",
+            "priority": "normal",
+        }]
+        msg = format_session_start(events)
+        assert "CONTEXT" in msg
+        assert "FIXES BY TEAMMATES" not in msg
+
+    def test_mixed_fixes_and_context(self):
+        """Events with and without diffs should be separated."""
+        events = [
+            {
+                "type": "change", "user": "a",
+                "result": "Modified config.toml\nDiff:\n+[server]\n+port = 3000",
+                "priority": "normal",
+            },
+            {
+                "type": "discovery", "user": "b",
+                "result": "Found endpoint issue",
+                "priority": "normal",
+            },
+        ]
+        msg = format_session_start(events)
+        assert "FIXES BY TEAMMATES" in msg
+        assert "CONTEXT" in msg
+        assert "IMPORTANT: Apply all FIXES first" in msg
+
+    def test_footer_with_fixes_has_apply_instruction(self):
+        """When fixes exist, footer should emphasize applying them first."""
+        events = [{
+            "type": "change", "user": "pioneer",
+            "result": "Fixed config\nDiff:\n+key = value",
+            "priority": "normal",
+        }]
+        msg = format_session_start(events)
+        assert "Apply all FIXES first" in msg
+        assert "Do NOT re-discover" in msg
+
 
 class TestFormatPreToolUse:
     def test_empty_events_returns_none(self):

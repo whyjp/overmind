@@ -10,12 +10,22 @@ CONTEXT_TYPES = {"discovery", "change"}
 BROADCAST_TYPE = "broadcast"
 
 
+def _has_diff(result: str) -> bool:
+    """Check if a result string contains a diff snippet."""
+    return "\nDiff:" in result or result.startswith("Diff:")
+
+
 def format_session_start(events: list[dict]) -> str | None:
-    """Format events for SessionStart hook — full instructional prompt."""
+    """Format events for SessionStart hook — full instructional prompt.
+
+    Events with diffs are presented as actionable FIXES that the agent
+    should apply proactively. Events without diffs remain informational.
+    """
     if not events:
         return None
 
     rules = []
+    fixes = []
     context = []
     broadcasts = []
 
@@ -37,6 +47,9 @@ def format_session_start(events: list[dict]) -> str | None:
                 rules.append(f"  Reason: {step}")
         elif etype == BROADCAST_TYPE:
             broadcasts.append(entry)
+        elif _has_diff(result):
+            # Events with diffs are actionable teammate fixes
+            fixes.append(entry)
         else:
             context.append(entry)
 
@@ -46,6 +59,14 @@ def format_session_start(events: list[dict]) -> str | None:
     if rules:
         lines.append("RULES — Apply these to all actions in this session:")
         lines.extend(rules)
+        lines.append("")
+
+    if fixes:
+        lines.append(
+            "FIXES BY TEAMMATES — Another agent already solved these problems. "
+            "Apply these fixes BEFORE running or testing the project:"
+        )
+        lines.extend(fixes)
         lines.append("")
 
     if context:
@@ -58,7 +79,16 @@ def format_session_start(events: list[dict]) -> str | None:
         lines.extend(broadcasts)
         lines.append("")
 
-    lines.append("Follow RULES strictly. Use CONTEXT to inform decisions when relevant.")
+    if fixes:
+        lines.append(
+            "IMPORTANT: Apply all FIXES first — they represent solved problems. "
+            "Do NOT re-discover issues that teammates already fixed. "
+            "Follow RULES strictly. Use CONTEXT to inform decisions."
+        )
+    else:
+        lines.append(
+            "Follow RULES strictly. Use CONTEXT to inform decisions when relevant."
+        )
 
     return "\n".join(lines)
 
