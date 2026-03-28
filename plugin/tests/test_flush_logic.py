@@ -74,6 +74,39 @@ class TestBuildChangeEvents:
         events = build_change_events(pending)
         assert events[0]["type"] == "change"
 
+    def test_lesson_auto_classifies_type(self):
+        """Pending entry with lesson maps action to event type."""
+        pending = [
+            {"file": "src/auth/hash.ts", "scope": "src/auth/*", "ts": "2026-03-29T10:00:00Z", "action": "Edit",
+             "lesson": {"action": "prohibit", "target": "bcrypt", "reason": "security"}},
+        ]
+        events = build_change_events(pending)
+        assert events[0]["type"] == "correction"
+
+    def test_lesson_replace_becomes_decision(self):
+        pending = [
+            {"file": "src/auth/hash.ts", "scope": "src/auth/*", "ts": "2026-03-29T10:00:00Z", "action": "Edit",
+             "lesson": {"action": "replace", "target": "bcrypt", "reason": "security", "replacement": "argon2"}},
+        ]
+        events = build_change_events(pending)
+        assert events[0]["type"] == "decision"
+
+    def test_branch_fields_included(self):
+        pending = [
+            {"file": "src/auth/login.ts", "scope": "src/auth/*", "ts": "2026-03-27T10:00:00Z", "action": "Edit"},
+        ]
+        events = build_change_events(pending, current_branch="feature/auth", base_branch="main")
+        assert events[0]["current_branch"] == "feature/auth"
+        assert events[0]["base_branch"] == "main"
+
+    def test_branch_fields_omitted_when_none(self):
+        pending = [
+            {"file": "src/auth/login.ts", "scope": "src/auth/*", "ts": "2026-03-27T10:00:00Z", "action": "Edit"},
+        ]
+        events = build_change_events(pending)
+        assert "current_branch" not in events[0]
+        assert "base_branch" not in events[0]
+
 
 class TestShouldFlush:
     """should_flush(state, new_scope) checks count/time/scope-change triggers."""

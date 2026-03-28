@@ -291,3 +291,106 @@ class TestLesson:
         dumped = result.events[0].model_dump()
         assert dumped["lesson"]["action"] == "prohibit"
         assert dumped["lesson"]["replacement"] is None
+
+
+@pytest.mark.asyncio
+class TestBranch:
+    async def test_push_pull_with_branch(self, store):
+        """Events with branch metadata round-trip through DB."""
+        evt = MemoryEvent(
+            id="evt_br_1", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-29T10:00:00Z",
+            type="change", result="auth refactor",
+            current_branch="feature/auth", base_branch="main",
+        )
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        assert result.events[0].current_branch == "feature/auth"
+        assert result.events[0].base_branch == "main"
+
+    async def test_push_pull_without_branch(self, store):
+        """Events without branch have None values (backward compat)."""
+        evt = _make_event("evt_br_2")
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        assert result.events[0].current_branch is None
+        assert result.events[0].base_branch is None
+
+    async def test_pull_branch_same_branch_sees_all(self, store):
+        """Events from the same branch are always visible."""
+        evt = MemoryEvent(
+            id="evt_br_same", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-29T10:00:00Z",
+            type="change", result="minor fix",
+            current_branch="feature/auth", base_branch="main",
+        )
+        await store.push([evt])
+        result = await store.pull(
+            repo_id="github.com/test/repo",
+            pull_branch="feature/auth", pull_base="main",
+        )
+        assert any(e.id == "evt_br_same" for e in result.events)
+
+    async def test_pull_branch_same_base_intent_visible(self, store):
+        """Intent from sibling branch (same base) is visible."""
+        evt = MemoryEvent(
+            id="evt_br_intent", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-29T10:00:00Z",
+            type="intent", result="planning auth refactor",
+            current_branch="feature/auth", base_branch="main",
+        )
+        await store.push([evt])
+        result = await store.pull(
+            repo_id="github.com/test/repo",
+            pull_branch="feature/cache", pull_base="main",
+        )
+        assert any(e.id == "evt_br_intent" for e in result.events)
+
+    async def test_pull_branch_different_base_filtered(self, store):
+        """Normal change from different base is filtered out."""
+        evt = MemoryEvent(
+            id="evt_br_diff", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-29T10:00:00Z",
+            type="change", result="unrelated change",
+            current_branch="hotfix/x", base_branch="develop",
+        )
+        await store.push([evt])
+        result = await store.pull(
+            repo_id="github.com/test/repo",
+            pull_branch="feature/auth", pull_base="main",
+        )
+        assert not any(e.id == "evt_br_diff" for e in result.events)
+
+    async def test_pull_no_branch_params_sees_all(self, store):
+        """Without branch params, all events visible (backward compat)."""
+        evt = MemoryEvent(
+            id="evt_br_all", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-29T10:00:00Z",
+            type="change", result="some change",
+            current_branch="hotfix/x", base_branch="develop",
+        )
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        assert any(e.id == "evt_br_all" for e in result.events)
+
+    async def test_pull_legacy_events_visible_with_branch(self, store):
+        """Events without branch metadata pass through when pulling with branch."""
+        evt = _make_event("evt_br_legacy")
+        await store.push([evt])
+        result = await store.pull(
+            repo_id="github.com/test/repo",
+            pull_branch="feature/auth", pull_base="main",
+        )
+        assert any(e.id == "evt_br_legacy" for e in result.events)
+
+    async def test_intent_type_valid(self, store):
+        """Intent event type is accepted."""
+        evt = MemoryEvent(
+            id="evt_intent_1", repo_id="github.com/test/repo",
+            user="dev_a", ts="2026-03-29T10:00:00Z",
+            type="intent", result="planning to refactor auth module",
+            current_branch="feature/auth", base_branch="main",
+        )
+        await store.push([evt])
+        result = await store.pull(repo_id="github.com/test/repo")
+        assert result.events[0].type == "intent"

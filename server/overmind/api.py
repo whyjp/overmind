@@ -76,6 +76,8 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[SQLiteStore] = N
         exclude_user: Optional[str] = Query(default=None),
         limit: int = Query(default=100),
         detail: DetailLevel = Query(default="full"),
+        current_branch: Optional[str] = Query(default=None),
+        base_branch: Optional[str] = Query(default=None),
     ) -> PullResponse:
         return await store.pull(
             repo_id,
@@ -85,6 +87,8 @@ def create_app(data_dir: Optional[Path] = None, store: Optional[SQLiteStore] = N
             exclude_user=exclude_user,
             limit=limit,
             detail=detail,
+            pull_branch=current_branch,
+            pull_base=base_branch,
         )
 
     @app.post("/api/memory/broadcast", response_model=BroadcastResponse)

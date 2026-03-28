@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-from api_client import get_repo_id, get_user, load_state, save_state, api_get
+from api_client import get_repo_id, get_user, load_state, save_state, api_get, get_current_branch, get_base_branch
 from context_writer import write_context_file
 from formatter import format_session_start
 
@@ -26,16 +26,29 @@ def main():
 
     user = get_user()
     state = load_state()
+
+    # Detect and cache branch info
+    current_branch = get_current_branch()
+    base_branch = get_base_branch()
+    state["current_branch"] = current_branch
+    state["base_branch"] = base_branch
+
     last_pull = state.get("last_pull_ts")
     if not last_pull:
         last_pull = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
 
-    result = api_get("/api/memory/pull", {
+    pull_params: dict = {
         "repo_id": repo_id,
         "exclude_user": user,
         "since": last_pull,
         "limit": "20",
-    })
+    }
+    if current_branch:
+        pull_params["current_branch"] = current_branch
+    if base_branch:
+        pull_params["base_branch"] = base_branch
+
+    result = api_get("/api/memory/pull", pull_params)
 
     if not result or result.get("count", 0) == 0:
         return

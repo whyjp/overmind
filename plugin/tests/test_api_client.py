@@ -92,3 +92,58 @@ class TestLoadSaveState:
         api_client.save_state({"result": "한글 테스트"})
         state = api_client.load_state()
         assert state["result"] == "한글 테스트"
+
+
+class TestGetCurrentBranch:
+    def test_returns_branch_name(self, monkeypatch):
+        monkeypatch.setattr(
+            api_client.subprocess, "run",
+            lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "feature/auth\n"})(),
+        )
+        assert api_client.get_current_branch() == "feature/auth"
+
+    def test_detached_head_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            api_client.subprocess, "run",
+            lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "HEAD\n"})(),
+        )
+        assert api_client.get_current_branch() is None
+
+    def test_git_failure_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            api_client.subprocess, "run",
+            lambda *a, **kw: type("R", (), {"returncode": 128, "stdout": ""})(),
+        )
+        assert api_client.get_current_branch() is None
+
+
+class TestGetBaseBranch:
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("OVERMIND_BASE_BRANCH", "develop")
+        assert api_client.get_base_branch() == "develop"
+
+    def test_detects_main(self, monkeypatch):
+        monkeypatch.delenv("OVERMIND_BASE_BRANCH", raising=False)
+        def mock_run(cmd, **kw):
+            if "main" in cmd:
+                return type("R", (), {"returncode": 0, "stdout": "abc123\n"})()
+            return type("R", (), {"returncode": 1, "stdout": ""})()
+        monkeypatch.setattr(api_client.subprocess, "run", mock_run)
+        assert api_client.get_base_branch() == "main"
+
+    def test_falls_back_to_master(self, monkeypatch):
+        monkeypatch.delenv("OVERMIND_BASE_BRANCH", raising=False)
+        def mock_run(cmd, **kw):
+            if "master" in cmd:
+                return type("R", (), {"returncode": 0, "stdout": "abc123\n"})()
+            return type("R", (), {"returncode": 1, "stdout": ""})()
+        monkeypatch.setattr(api_client.subprocess, "run", mock_run)
+        assert api_client.get_base_branch() == "master"
+
+    def test_no_base_returns_none(self, monkeypatch):
+        monkeypatch.delenv("OVERMIND_BASE_BRANCH", raising=False)
+        monkeypatch.setattr(
+            api_client.subprocess, "run",
+            lambda *a, **kw: type("R", (), {"returncode": 1, "stdout": ""})(),
+        )
+        assert api_client.get_base_branch() is None

@@ -11,6 +11,8 @@ from __future__ import annotations
 RULE_TYPES = {"correction", "decision"}
 # Event types that are informational context
 CONTEXT_TYPES = {"discovery", "change"}
+# Forward-looking declarations
+INTENT_TYPE = "intent"
 # Broadcast is its own category
 BROADCAST_TYPE = "broadcast"
 
@@ -30,6 +32,7 @@ def format_session_start(events: list[dict]) -> str | None:
         return None
 
     rules = []
+    intents = []
     changes = []
     context = []
     broadcasts = []
@@ -40,15 +43,19 @@ def format_session_start(events: list[dict]) -> str | None:
         result = evt.get("result", "")
         priority = evt.get("priority", "normal")
         process = evt.get("process", [])
+        branch = evt.get("current_branch")
 
-        entry = f"- {result} (by {user})"
+        branch_tag = f" [{branch}]" if branch else ""
+        entry = f"- {result} (by {user}{branch_tag})"
         if priority == "high_priority":
-            entry = f"- [HIGH PRIORITY] {result} (by {user})"
+            entry = f"- [HIGH PRIORITY] {result} (by {user}{branch_tag})"
 
         if etype in RULE_TYPES:
             rules.append(entry)
             for step in process[:2]:
                 rules.append(f"  Reason: {step}")
+        elif etype == INTENT_TYPE:
+            intents.append(entry)
         elif etype == BROADCAST_TYPE:
             broadcasts.append(entry)
         elif _has_diff(result):
@@ -62,6 +69,11 @@ def format_session_start(events: list[dict]) -> str | None:
     if rules:
         lines.append("RULES — Apply these to all actions in this session:")
         lines.extend(rules)
+        lines.append("")
+
+    if intents:
+        lines.append("PLANNED CHANGES — Other agents intend to do this:")
+        lines.extend(intents)
         lines.append("")
 
     if changes:
@@ -96,6 +108,7 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
         return None
 
     rules = []
+    intents = []
     changes = []
     warnings = []
 
@@ -108,6 +121,8 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
         if etype in RULE_TYPES or priority == "high_priority":
             prefix = "[HIGH PRIORITY] " if priority == "high_priority" else ""
             rules.append(f"- {prefix}{result} (by {user})")
+        elif etype == INTENT_TYPE:
+            intents.append(f"- {result} (by {user})")
         elif _has_diff(result):
             changes.append(f"- {result} (by {user})")
         else:
@@ -119,6 +134,11 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
     if rules:
         lines.append("RULES for this scope — follow before proceeding:")
         lines.extend(rules)
+        lines.append("")
+
+    if intents:
+        lines.append("PLANNED CHANGES for this scope:")
+        lines.extend(intents)
         lines.append("")
 
     if changes:

@@ -121,6 +121,10 @@ class SQLiteStore:
             await self.db.execute("ALTER TABLE events ADD COLUMN prevented_count INTEGER DEFAULT 0")
         if "lesson" not in cols:
             await self.db.execute("ALTER TABLE events ADD COLUMN lesson TEXT")
+        if "current_branch" not in cols:
+            await self.db.execute("ALTER TABLE events ADD COLUMN current_branch TEXT")
+        if "base_branch" not in cols:
+            await self.db.execute("ALTER TABLE events ADD COLUMN base_branch TEXT")
         await self.db.commit()
 
     async def close(self) -> None:
@@ -150,8 +154,8 @@ class SQLiteStore:
                 evt.summary = await self._summary_generator.generate(evt)
 
             async with self.db.execute(
-                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope, summary, prevented_count, lesson)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR IGNORE INTO events (id, repo_id, user, ts, type, result, prompt, files, process, priority, scope, summary, prevented_count, lesson, current_branch, base_branch)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     evt.id,
                     evt.repo_id,
@@ -167,6 +171,8 @@ class SQLiteStore:
                     evt.summary,
                     evt.prevented_count,
                     json.dumps(evt.lesson.model_dump()) if evt.lesson else None,
+                    evt.current_branch,
+                    evt.base_branch,
                 ),
             ) as cur:
                 if cur.rowcount > 0:
@@ -208,6 +214,36 @@ class SQLiteStore:
                 return True
         return False
 
+    def _branch_relevant(
+        self, row: aiosqlite.Row, pull_branch: str, pull_base: str | None
+    ) -> bool:
+        """3-tier branch relevance: same branch > same base > broadcast/high_priority only."""
+        evt_branch = row["current_branch"]
+        evt_base = row["base_branch"]
+
+        # Same branch: always relevant
+        if evt_branch and evt_branch == pull_branch:
+            return True
+
+        # Same base branch: cross-branch-valuable types pass
+        if evt_base and pull_base and evt_base == pull_base:
+            if row["type"] in ("intent", "discovery", "correction", "broadcast"):
+                return True
+            # change/decision: pass if they have files (they carry useful info)
+            evt_files = json.loads(row["files"]) if row["files"] else []
+            if evt_files:
+                return True
+
+        # Different base or unknown: only broadcast/high_priority
+        if row["priority"] == "high_priority" or row["type"] == "broadcast":
+            return True
+
+        # Legacy events (no branch info): pass through
+        if evt_branch is None and evt_base is None:
+            return True
+
+        return False
+
     def _row_to_event(self, row: aiosqlite.Row, detail: DetailLevel = "full") -> MemoryEvent:
         """Convert an aiosqlite.Row to a MemoryEvent, respecting detail level."""
         files = json.loads(row["files"]) if row["files"] else []
@@ -236,6 +272,8 @@ class SQLiteStore:
             summary=row["summary"],
             prevented_count=row["prevented_count"] or 0,
             lesson=lesson,
+            current_branch=row["current_branch"],
+            base_branch=row["base_branch"],
         )
 
     async def pull(
@@ -248,8 +286,16 @@ class SQLiteStore:
         scope: Optional[str] = None,
         limit: int = 100,
         detail: DetailLevel = "full",
+        pull_branch: Optional[str] = None,
+        pull_base: Optional[str] = None,
     ) -> PullResponse:
-        """Return events for a repo, sorted high_priority-first then newest-first."""
+        """Return events for a repo, sorted high_priority-first then newest-first.
+
+        When pull_branch/pull_base are provided, applies branch-aware relevance:
+        - Same branch: all events
+        - Same base_branch: intent/discovery/correction/broadcast + file-bearing changes
+        - Different/unknown base: only broadcast and high_priority
+        """
         # Build query
         conditions = ["repo_id = ?"]
         params: list[str] = [repo_id]
@@ -277,6 +323,10 @@ class SQLiteStore:
             evt_files = json.loads(row["files"]) if row["files"] else []
             if self._matches_scope(row["scope"], evt_files, scope):
                 filtered.append(row)
+
+        # Branch-aware relevance filter
+        if pull_branch is not None:
+            filtered = [r for r in filtered if self._branch_relevant(r, pull_branch, pull_base)]
 
         # Sort: high_priority first (newest within), then normal (newest within)
         high = sorted(
@@ -683,13 +733,16 @@ CREATE TABLE IF NOT EXISTS events (
     scope TEXT,
     summary TEXT,
     prevented_count INTEGER DEFAULT 0,
-    lesson TEXT
+    lesson TEXT,
+    current_branch TEXT,
+    base_branch TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo_id);
 CREATE INDEX IF NOT EXISTS idx_events_repo_ts ON events(repo_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_repo_user ON events(repo_id, user);
 CREATE INDEX IF NOT EXISTS idx_events_repo_scope ON events(repo_id, scope);
+CREATE INDEX IF NOT EXISTS idx_events_repo_branch ON events(repo_id, base_branch);
 
 CREATE TABLE IF NOT EXISTS pull_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

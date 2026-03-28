@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-EventType = Literal["decision", "correction", "discovery", "change", "broadcast"]
+EventType = Literal["decision", "correction", "discovery", "change", "broadcast", "intent"]
 Priority = Literal["normal", "high_priority"]
 FeedbackType = Literal["prevented_error", "helpful", "irrelevant"]
 LessonAction = Literal["prohibit", "prefer", "require", "avoid", "replace"]
@@ -44,6 +44,8 @@ class MemoryEvent(BaseModel):
     summary: str | None = None
     prevented_count: int = 0
     lesson: StructuredLesson | None = None
+    current_branch: str | None = None
+    base_branch: str | None = None
 
 
 class PushEventInput(BaseModel):
@@ -63,6 +65,8 @@ class PushEventInput(BaseModel):
     priority: Priority = "normal"
     scope: str | None = None
     lesson: StructuredLesson | None = None
+    current_branch: str | None = None
+    base_branch: str | None = None
 
     def to_event(self, repo_id: str, user: str) -> MemoryEvent:
         return MemoryEvent(

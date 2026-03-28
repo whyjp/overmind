@@ -130,6 +130,20 @@ class TestFormatSessionStart:
         assert "TEAMMATE CHANGES" in msg
 
 
+    def test_intent_in_planned_changes(self):
+        """Intent events appear in PLANNED CHANGES section."""
+        events = [{"type": "intent", "user": "dev_a", "result": "refactoring auth module", "priority": "normal"}]
+        msg = format_session_start(events)
+        assert "PLANNED CHANGES" in msg
+        assert "refactoring auth module" in msg
+
+    def test_branch_tag_in_entry(self):
+        """Branch name appears in event entry when present."""
+        events = [{"type": "change", "user": "dev_a", "result": "fix", "priority": "normal", "current_branch": "feature/auth"}]
+        msg = format_session_start(events)
+        assert "[feature/auth]" in msg
+
+
 class TestFormatPreToolUse:
     def test_empty_events_returns_none(self):
         assert format_pre_tool_use([], "src/auth/*") is None

@@ -11,10 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Type group display order (importance descending)
-TYPE_ORDER = ["correction", "decision", "discovery", "change", "broadcast"]
+TYPE_ORDER = ["correction", "decision", "intent", "discovery", "change", "broadcast"]
 TYPE_LABELS = {
     "correction": "Corrections",
     "decision": "Decisions",
+    "intent": "Planned Changes",
     "discovery": "Discoveries",
     "change": "Changes",
     "broadcast": "Broadcasts",

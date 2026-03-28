@@ -95,6 +95,43 @@ def get_user() -> str:
     return os.environ.get("OVERMIND_USER", os.environ.get("USER", os.environ.get("USERNAME", "unknown")))
 
 
+def get_current_branch() -> str | None:
+    """Get current git branch name. Returns None if detached HEAD."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        branch = result.stdout.strip()
+        return None if branch == "HEAD" else branch
+    except Exception:
+        return None
+
+
+def get_base_branch() -> str | None:
+    """Detect the base branch this branch forked from.
+
+    Checks OVERMIND_BASE_BRANCH env var first, then tries main/master
+    by looking for a common ancestor.
+    """
+    env_base = os.environ.get("OVERMIND_BASE_BRANCH")
+    if env_base:
+        return env_base
+    for candidate in ("main", "master"):
+        try:
+            result = subprocess.run(
+                ["git", "merge-base", candidate, "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def load_state() -> dict:
     """Load persistent state (last_pull_ts etc)."""
     if STATE_FILE.exists():
@@ -178,11 +215,25 @@ def should_flush(state: dict, new_scope: str) -> bool:
     return False
 
 
-def build_change_events(pending: list[dict], diff_summary: str = "") -> list[dict]:
+_LESSON_TYPE_MAP = {
+    "prohibit": "correction",
+    "require": "correction",
+    "replace": "decision",
+    "prefer": "decision",
+    "avoid": "discovery",
+}
+
+
+def build_change_events(
+    pending: list[dict],
+    diff_summary: str = "",
+    current_branch: str | None = None,
+    base_branch: str | None = None,
+) -> list[dict]:
     """Group pending changes by scope into change event dicts.
 
-    Phase 2 TODO: when entry['lesson'] is not None, use lesson to determine
-    event type (correction/decision) instead of defaulting to 'change'.
+    If any pending entry has a lesson, the event type is derived from
+    the lesson action instead of defaulting to 'change'.
     """
     if not pending:
         return []
@@ -215,14 +266,27 @@ def build_change_events(pending: list[dict], diff_summary: str = "") -> list[dic
 
         result = "\n".join(parts)
 
-        events.append({
+        # Derive event type from lesson if any pending entry has one
+        evt_type = "change"
+        for entry in pending:
+            if entry.get("scope") == scope and entry.get("lesson"):
+                action = entry["lesson"].get("action", "")
+                evt_type = _LESSON_TYPE_MAP.get(action, "change")
+                break
+
+        evt: dict = {
             "id": f"auto_{uuid.uuid4().hex[:12]}",
-            "type": "change",
+            "type": evt_type,
             "ts": now,
             "result": result,
             "files": files,
             "scope": scope,
-        })
+        }
+        if current_branch:
+            evt["current_branch"] = current_branch
+        if base_branch:
+            evt["base_branch"] = base_branch
+        events.append(evt)
 
     return events
 
@@ -237,7 +301,12 @@ def flush_pending_changes(state: dict, repo_id: str, user: str) -> dict:
 
     all_files = list({e["file"] for e in pending})
     diff_summary = collect_diff_summary(all_files)
-    events = build_change_events(pending, diff_summary=diff_summary)
+    events = build_change_events(
+        pending,
+        diff_summary=diff_summary,
+        current_branch=state.get("current_branch"),
+        base_branch=state.get("base_branch"),
+    )
     if events:
         api_post("/api/memory/push", {
             "repo_id": repo_id,
