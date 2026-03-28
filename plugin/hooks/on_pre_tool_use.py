@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook: pull related events when editing files.
 
-If urgent corrections exist for the target scope, BLOCK the tool use.
+If high_priority corrections exist for the target scope, BLOCK the tool use.
 Otherwise, inject context as systemMessage.
 """
 
@@ -40,10 +40,10 @@ def main():
 
     events = result["events"]
 
-    # Check for blocking rules: urgent corrections/decisions for this scope
+    # Check for blocking rules: high_priority corrections/decisions for this scope
     blocking_rules = [
         evt for evt in events
-        if evt.get("priority") == "urgent"
+        if evt.get("priority") == "high_priority"
         and evt.get("type") in ("correction", "decision")
     ]
 

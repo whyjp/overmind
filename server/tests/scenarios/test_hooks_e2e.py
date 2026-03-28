@@ -68,7 +68,7 @@ def seed_events(server, base_url):
                 "ts": "2026-03-26T02:00:00Z",
                 "result": "DO NOT modify deploy scripts directly",
                 "files": ["src/deploy/run.sh"],
-                "priority": "urgent",
+                "priority": "high_priority",
             },
         ],
     })
@@ -210,8 +210,8 @@ class TestPreToolUseHook:
         stdout = run_hook("on_pre_tool_use.py", env, stdin_data=stdin_data)
         assert stdout == ""
 
-    def test_urgent_correction_blocks_edit(self, server, base_url, state_dir, seed_events):
-        """Urgent correction in scope → tool use BLOCKED."""
+    def test_high_priority_correction_blocks_edit(self, server, base_url, state_dir, seed_events):
+        """High-priority correction in scope → tool use BLOCKED."""
         env = _make_hook_env(base_url, state_dir, "dev_b", "pretool_block")
         stdin_data = json.dumps({
             "tool_name": "Edit",

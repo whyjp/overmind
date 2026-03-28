@@ -51,16 +51,12 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - ~~SessionEnd push 내용 개선~~ ✅ PostToolUse로 세션 중 변경 자동 push, SessionEnd는 잔여 flush만
 - ~~테스트 보강~~ ✅ Plugin 59개 + Server 51개 = 110개 테스트
 
-### 설계 인사이트 (스펙 반영 대기)
+### 설계 인사이트 (반영 완료)
 
-디자인 스펙에 아직 반영되지 않은 논의 결과:
-
-1. **Pull 응답 최적화 원칙**: delta-only pull, context 부담 = 프롬프트 간격 × 동시 작업자 수
-2. **`detail` 파라미터**: `?detail=lesson` (기본) | `diff` | `full`
-3. **서머리 생성**: 구조적 추출 우선, LLM은 process→lesson 압축 시에만
-4. **urgent → high_priority**: 네이밍 재검토 필요 (실제 동작은 pull 시 상단 정렬뿐)
-
-반영 대상: design spec §3.2 (pull API), §5.2 (훅 동작), §10 (확장 경로)
+- ~~Pull 응답 최적화 (delta-only pull)~~ ✅ `since` 파라미터 + `last_pull_ts` 상태 추적으로 구현 완료
+- ~~`detail` 파라미터~~ ✅ `?detail=summary|full` 구현 완료
+- ~~서머리 생성~~ ✅ SummaryGenerator Protocol 구현 완료
+- ~~urgent → high_priority 네이밍~~ ✅ 코드 전체 리네이밍 완료 (Priority = "normal" | "high_priority")
 
 ### Phase 2 계획 (A/B 병렬, 동등 우선순위)
 
@@ -69,7 +65,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - ~~`?detail=summary|full` pull 파라미터~~ ✅
 - ~~SQLite store 이관~~ ✅
 - ~~피드백 점수 (prevented_error, helpful/irrelevant) 축적~~ ✅ (feedback API + MCP tool + PreToolUse 자동)
-- PostToolUse lesson 필드 활용: 메모리/레슨 처리 플러그인 연동 시 자동 타입 분류
+- ~~PostToolUse lesson 필드 활용~~ → Phase 3으로 이관 (플러그인 연동 시 자동 타입 분류)
 - ~~**Push "why" 보강**~~ ✅ git diff snippet + Bash 에러 context를 result에 포함 (diff_collector + PostToolUse context capture)
 
 **Phase 2-B: 클라이언트 레슨 반영 (수신 측 영향력)**

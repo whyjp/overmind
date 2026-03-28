@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 EventType = Literal["decision", "correction", "discovery", "change", "broadcast"]
-Priority = Literal["normal", "urgent"]
+Priority = Literal["normal", "high_priority"]
 FeedbackType = Literal["prevented_error", "helpful", "irrelevant"]
 
 

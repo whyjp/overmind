@@ -37,8 +37,8 @@ def format_session_start(events: list[dict]) -> str | None:
         process = evt.get("process", [])
 
         entry = f"- {result} (by {user})"
-        if priority == "urgent":
-            entry = f"- [URGENT] {result} (by {user})"
+        if priority == "high_priority":
+            entry = f"- [HIGH PRIORITY] {result} (by {user})"
 
         if etype in RULE_TYPES:
             rules.append(entry)
@@ -64,7 +64,8 @@ def format_session_start(events: list[dict]) -> str | None:
     if fixes:
         lines.append(
             "FIXES BY TEAMMATES — Another agent already solved these problems. "
-            "Apply these fixes BEFORE running or testing the project:"
+            "If you encounter errors, apply ALL of these diffs at once instead of "
+            "fixing one issue at a time:"
         )
         lines.extend(fixes)
         lines.append("")
@@ -81,8 +82,8 @@ def format_session_start(events: list[dict]) -> str | None:
 
     if fixes:
         lines.append(
-            "IMPORTANT: Apply all FIXES first — they represent solved problems. "
-            "Do NOT re-discover issues that teammates already fixed. "
+            "IMPORTANT: When you hit an error, apply ALL fixes above at once — "
+            "do NOT re-discover issues that teammates already solved. "
             "Follow RULES strictly. Use CONTEXT to inform decisions."
         )
     else:
@@ -94,11 +95,16 @@ def format_session_start(events: list[dict]) -> str | None:
 
 
 def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
-    """Format events for PreToolUse hook — scope-specific warnings."""
+    """Format events for PreToolUse hook — scope-specific warnings.
+
+    Events with diffs are shown as FIXES — the agent should apply all of them
+    at once instead of discovering issues one by one.
+    """
     if not events:
         return None
 
     rules = []
+    fixes = []
     warnings = []
 
     for evt in events:
@@ -107,9 +113,11 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
         result = evt.get("result", "")
         priority = evt.get("priority", "normal")
 
-        if etype in RULE_TYPES or priority == "urgent":
-            prefix = "[URGENT] " if priority == "urgent" else ""
+        if etype in RULE_TYPES or priority == "high_priority":
+            prefix = "[HIGH PRIORITY] " if priority == "high_priority" else ""
             rules.append(f"- {prefix}{result} (by {user})")
+        elif _has_diff(result):
+            fixes.append(f"- {result} (by {user})")
         else:
             warnings.append(f"- {result} (by {user})")
 
@@ -121,11 +129,25 @@ def format_pre_tool_use(events: list[dict], scope: str) -> str | None:
         lines.extend(rules)
         lines.append("")
 
+    if fixes:
+        lines.append(
+            "FIXES BY TEAMMATES — Apply ALL of these diffs in this edit. "
+            "Do not fix only the current error; fix everything at once:"
+        )
+        lines.extend(fixes)
+        lines.append("")
+
     if warnings:
         lines.append("Related context:")
         lines.extend(warnings)
         lines.append("")
 
-    lines.append("Check these before making changes to this scope.")
+    if fixes:
+        lines.append(
+            "IMPORTANT: Apply ALL fixes above in a single edit — "
+            "another agent already discovered and solved these problems."
+        )
+    else:
+        lines.append("Check these before making changes to this scope.")
 
     return "\n".join(lines)

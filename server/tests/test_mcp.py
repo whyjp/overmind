@@ -47,7 +47,7 @@ class TestMCPTools:
                 "repo_id": "github.com/test/repo",
                 "user": "dev_a",
                 "message": "API 스키마 v2로 변경",
-                "priority": "urgent",
+                "priority": "high_priority",
             })
             assert "delivered" in str(bcast_result)
 

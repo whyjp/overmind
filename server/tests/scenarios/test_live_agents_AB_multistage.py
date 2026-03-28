@@ -358,8 +358,8 @@ def _api_get(base_url: str, path: str, params: dict | None = None) -> dict:
 # Model selection via env var: AGENT_MODEL=haiku|sonnet|opus (default: system default)
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "")
 
-# Prompt is intentionally minimal — no hints about reading source files.
-# Pioneer discovers through trial-and-error; Student should use Overmind context.
+# Prompt tells agent to run start.sh first (correct — server might already work).
+# After failure, Student should use Overmind FIXES to fix ALL issues at once.
 SHARED_PROMPT = (
     "Get the Hive server running. "
     "Run `bash start.sh` to start it. "
@@ -818,25 +818,23 @@ class TestMultiStageAB:
         print("  ASSERT PASS: Naive solved all stages")
 
         # ── Assertion 2: Student should show Overmind advantage ──
-        # At least ONE of these must be true for the test to pass:
-        #   a) Student has proactive_config_fix (edits before first run)
-        #   b) Student has fewer server runs than Naive
-        #   c) Student has fewer src/ file reads than Naive
+        # Core metric: fewer server runs (fixes all at once after first failure)
+        # Secondary: fewer total tool uses, fewer turns
         overmind_advantage = (
-            s_proactive
-            or s_runs < n_runs
-            or s_analysis["src_file_reads"] < n_analysis["src_file_reads"]
+            s_runs < n_runs
+            or s_analysis["total_tool_uses"] < n_analysis["total_tool_uses"]
+            or s_proactive
         )
 
         advantage_reasons = []
-        if s_proactive:
-            advantage_reasons.append("proactive config fix before first run")
         if s_runs < n_runs:
             advantage_reasons.append(f"{n_runs - s_runs} fewer server runs")
-        if s_analysis["src_file_reads"] < n_analysis["src_file_reads"]:
+        if s_analysis["total_tool_uses"] < n_analysis["total_tool_uses"]:
             advantage_reasons.append(
-                f"{n_analysis['src_file_reads'] - s_analysis['src_file_reads']} fewer src reads"
+                f"{n_analysis['total_tool_uses'] - s_analysis['total_tool_uses']} fewer tool uses"
             )
+        if s_proactive:
+            advantage_reasons.append("proactive config fix before first run")
 
         if overmind_advantage:
             print(f"\n  >> OVERMIND ADVANTAGE CONFIRMED:")

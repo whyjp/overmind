@@ -20,7 +20,7 @@ overmind_pull(
 
 2. Present the results to the user in a readable format:
    - Group by user
-   - Highlight urgent/broadcast events
+   - Highlight high-priority/broadcast events
    - Show process logs for corrections/decisions
    - Flag any polymorphism (same scope, different users with different intents)
 

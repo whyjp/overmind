@@ -80,11 +80,11 @@ class TestBroadcastRequest:
             repo_id="github.com/user/project",
             user="master_agent",
             message="API 스키마 v2로 변경",
-            priority="urgent",
+            priority="high_priority",
             scope="src/api/*",
             related_files=["src/api/schema.ts"],
         )
-        assert req.priority == "urgent"
+        assert req.priority == "high_priority"
 
     def test_default_priority(self):
         req = BroadcastRequest(

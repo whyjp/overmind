@@ -121,12 +121,12 @@ class TestPullBasic:
         assert result.has_more is False
 
     @pytest.mark.asyncio
-    async def test_pull_broadcast_urgent_first(self, store):
+    async def test_pull_broadcast_high_priority_first(self, store):
         evt_normal = _make_event("evt_001", priority="normal", ts="2026-03-26T05:00:00Z")
-        evt_urgent = _make_event("evt_002", priority="urgent", ts="2026-03-26T04:00:00Z")
-        await store.push([evt_normal, evt_urgent])
+        evt_high = _make_event("evt_002", priority="high_priority", ts="2026-03-26T04:00:00Z")
+        await store.push([evt_normal, evt_high])
         result = await store.pull(repo_id="github.com/test/repo")
-        assert result.events[0].id == "evt_002"  # urgent first despite older ts
+        assert result.events[0].id == "evt_002"  # high_priority first despite older ts
 
     @pytest.mark.asyncio
     async def test_pull_different_repos_isolated(self, store):

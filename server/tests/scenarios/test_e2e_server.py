@@ -114,7 +114,7 @@ class TestE2ESubprocess:
             "repo_id": "github.com/e2e/subprocess",
             "user": "master",
             "message": "subprocess broadcast test",
-            "priority": "urgent",
+            "priority": "high_priority",
         })
         assert result["delivered"] is True
 
@@ -122,9 +122,9 @@ class TestE2ESubprocess:
             "repo_id": "github.com/e2e/subprocess",
             "exclude_user": "dev_b",
         })
-        # Urgent broadcast should be first
+        # High-priority broadcast should be first
         assert pull["events"][0]["type"] == "broadcast"
-        assert pull["events"][0]["priority"] == "urgent"
+        assert pull["events"][0]["priority"] == "high_priority"
 
     def test_report(self, server_process):
         """Report endpoint returns correct stats."""

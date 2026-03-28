@@ -10,7 +10,7 @@ Share an important change, discovery, or decision with all team members via Over
 
 1. Ask the user what message to broadcast (unless already clear from context)
 2. Determine the priority:
-   - "urgent": breaking changes, API schema changes, blocking issues
+   - "high_priority": breaking changes, API schema changes, blocking issues
    - "normal": general discoveries, FYIs, non-blocking updates
 3. Identify the affected scope (file paths or glob patterns)
 4. Use the `overmind_broadcast` MCP tool to send the broadcast:
@@ -20,7 +20,7 @@ overmind_broadcast(
   repo_id="<derived from git remote>",
   user="<current user>",
   message="<the broadcast message>",
-  priority="<urgent|normal>",
+  priority="<high_priority|normal>",
   scope="<affected scope>",
   related_files=["<list of affected files>"]
 )

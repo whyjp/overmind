@@ -254,10 +254,10 @@ def main():
     post("/api/memory/broadcast", {
         "repo_id": REPO, "user": "master_agent",
         "message": "API 통합 테스트 시작. auth+cache+DB 모두 완료 상태 필요.",
-        "priority": "urgent", "scope": "src/*",
+        "priority": "high_priority", "scope": "src/*",
         "related_files": ["src/auth/", "src/cache/", "src/db/"],
     })
-    print("  master_agent broadcast: urgent 통합 테스트 알림")
+    print("  master_agent broadcast: high_priority 통합 테스트 알림")
 
     time.sleep(0.2)
 

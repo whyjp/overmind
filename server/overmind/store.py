@@ -241,7 +241,7 @@ class SQLiteStore:
         limit: int = 100,
         detail: DetailLevel = "full",
     ) -> PullResponse:
-        """Return events for a repo, sorted urgent-first then newest-first."""
+        """Return events for a repo, sorted high_priority-first then newest-first."""
         # Build query
         conditions = ["repo_id = ?"]
         params: list[str] = [repo_id]
@@ -270,18 +270,18 @@ class SQLiteStore:
             if self._matches_scope(row["scope"], evt_files, scope):
                 filtered.append(row)
 
-        # Sort: urgent first (newest within), then normal (newest within)
-        urgent = sorted(
-            [r for r in filtered if r["priority"] == "urgent"],
+        # Sort: high_priority first (newest within), then normal (newest within)
+        high = sorted(
+            [r for r in filtered if r["priority"] == "high_priority"],
             key=lambda r: _parse_ts(r["ts"]),
             reverse=True,
         )
         normal = sorted(
-            [r for r in filtered if r["priority"] != "urgent"],
+            [r for r in filtered if r["priority"] != "high_priority"],
             key=lambda r: _parse_ts(r["ts"]),
             reverse=True,
         )
-        sorted_rows = urgent + normal
+        sorted_rows = high + normal
 
         has_more = len(sorted_rows) > limit
         result_rows = sorted_rows[:limit]

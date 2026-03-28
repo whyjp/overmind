@@ -68,13 +68,13 @@ def create_mcp_server(store: SQLiteStore) -> FastMCP:
         scope: str | None = None,
         related_files: list[str] | None = None,
     ) -> dict:
-        """Broadcast urgent message to all agents on this repo.
+        """Broadcast high-priority message to all agents on this repo.
 
         Args:
             repo_id: Repository identifier
             user: Sender identifier
             message: Broadcast message content
-            priority: "normal" or "urgent"
+            priority: "normal" or "high_priority"
             scope: Affected scope (e.g. "src/api/*")
             related_files: List of affected file paths
         """

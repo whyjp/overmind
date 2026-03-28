@@ -274,8 +274,8 @@ function renderEventFeed(events) {
         row.style.setProperty('--i', i);
 
         const typeAbbr = { correction: 'FIX', decision: 'DEC', discovery: 'NEW', broadcast: 'BCT', change: 'CHG' };
-        const urgentTag = evt.priority === 'urgent'
-            ? '<span class="event-meta-urgent">urgent</span>' : '';
+        const highPriorityTag = evt.priority === 'high_priority'
+            ? '<span class="event-meta-urgent">high priority</span>' : '';
 
         row.innerHTML = `
             <div class="event-type-dot event-type-dot--${evt.type}">
@@ -286,7 +286,7 @@ function renderEventFeed(events) {
                 <div class="event-meta">
                     <span class="event-meta-user">${esc(evt.user)}</span>
                     <span>${new Date(evt.ts).toLocaleString()}</span>
-                    ${urgentTag}
+                    ${highPriorityTag}
                 </div>
             </div>
         `;

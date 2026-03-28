@@ -110,7 +110,7 @@ class TestBroadcastEndpoint:
             "repo_id": "github.com/test/repo",
             "user": "master_agent",
             "message": "API v2로 변경",
-            "priority": "urgent",
+            "priority": "high_priority",
             "scope": "src/api/*",
             "related_files": ["src/api/schema.ts"],
         })
@@ -123,8 +123,8 @@ class TestBroadcastEndpoint:
         await client.post("/api/memory/broadcast", json={
             "repo_id": "github.com/test/repo",
             "user": "master_agent",
-            "message": "urgent change",
-            "priority": "urgent",
+            "message": "high priority change",
+            "priority": "high_priority",
         })
         resp = await client.get("/api/memory/pull", params={
             "repo_id": "github.com/test/repo",
@@ -132,7 +132,7 @@ class TestBroadcastEndpoint:
         body = resp.json()
         assert body["count"] == 1
         assert body["events"][0]["type"] == "broadcast"
-        assert body["events"][0]["priority"] == "urgent"
+        assert body["events"][0]["priority"] == "high_priority"
 
 
 @pytest.mark.asyncio

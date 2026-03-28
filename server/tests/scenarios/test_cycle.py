@@ -5,7 +5,7 @@ Scenario:
   2. dev_b pulls → sees dev_a's 3 events
   3. dev_b pushes 2 events (cache layer)
   4. dev_a pulls → sees dev_b's 2 events (not own)
-  5. master_agent broadcasts urgent message
+  5. master_agent broadcasts high_priority message
   6. All agents pull → each sees broadcast + others' events
   7. Graph has cross-edges (pushed + consumed/pulled)
   8. Report stats match expected counts
@@ -114,7 +114,7 @@ class TestPushPullCycle:
             "repo_id": REPO,
             "user": "master_agent",
             "message": "API 통합 테스트 12:30 시작",
-            "priority": "urgent",
+            "priority": "high_priority",
             "scope": "src/*",
             "related_files": ["src/auth/", "src/cache/"],
         })
@@ -132,8 +132,8 @@ class TestPushPullCycle:
             assert body["count"] >= expected_min, (
                 f"{user} expected >= {expected_min} events, got {body['count']}"
             )
-            # Broadcast should be first (urgent priority)
-            assert body["events"][0]["priority"] == "urgent"
+            # Broadcast should be first (high_priority)
+            assert body["events"][0]["priority"] == "high_priority"
             assert body["events"][0]["type"] == "broadcast"
 
         # ── Step 7: Graph has cross-edges ──
