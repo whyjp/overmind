@@ -28,11 +28,12 @@ def main():
     user = get_user()
     scope = file_to_scope(file_path)
 
+    # Pull WITHOUT scope filter — scope matching uses absolute paths which
+    # differ between agents. Pull all recent events and let formatter decide.
     result = api_get("/api/memory/pull", {
         "repo_id": repo_id,
-        "scope": scope,
         "exclude_user": user,
-        "limit": "5",
+        "limit": "10",
     })
 
     if not result or result.get("count", 0) == 0:

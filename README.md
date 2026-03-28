@@ -65,52 +65,45 @@ OVERMIND_USER=agent_b claude
 
 Agent A 작업 → 세션 종료 → Agent B 세션 시작 시 Agent A의 이벤트가 자동 pull됩니다.
 
-## A/B Benchmark: Cross-Agent Lesson Sharing
+## A/B Benchmark: Cross-Agent Knowledge Transfer
 
-3개의 동일한 Claude 에이전트에게 같은 프롬프트(`bash start.sh`로 서버를 실행하라)를 주고,
-**Overmind 연결 여부만 다르게** 설정한 A/B 테스트.
+3개의 Claude 에이전트에게 동일 프롬프트를 주고, **Overmind 연결 여부만 다르게** 설정한 A/B 테스트.
+Pioneer가 먼저 시행착오를 겪고, Student(+Overmind)와 Naive(-Overmind)가 같은 태스크를 수행한다.
 
-### 테스트 설계
-
-Node.js 서버가 **6개 모듈, 8단계 캐스케이드**로 순차적 에러를 발생시킨다:
+### 실측 결과 (2026-03-28, haiku × 4회)
 
 ```
-server.js → network.js([server] + env) → auth.js(key_file) → session.js([session] + ttl≥60)
-          → routes.js([routes].paths) → middleware.js([middleware].order) → logging.js(format 패턴)
+              Pioneer    Student (+OM)    Naive (Control)
+              ────────   ─────────────    ───────────────
+start.sh 실행   7-11        7              7-8
+tool uses       22-28       20-21          23-24
+advantage       —           3/4 (75%)      —
 ```
 
-Pioneer와 Naive는 **실행 → 실패 → 분석 → 수정**을 6-9회 반복해야 한다.
-Student는 Overmind에서 Pioneer의 **diff-enriched 이벤트**를 수신한 후 선제적으로 적용한다.
+Student가 동일한 start.sh 횟수에서도 **더 적은 도구 호출**로 태스크를 완수함.
+Pioneer의 diff가 `.claude/overmind-context.md`에 기록되어 세션 내내 참조 가능.
 
-### 핵심 지표: 선제적 수정 (proactive_config_fix)
-
-```
-Pioneer/Naive:  start.sh → fail → read src → fix → start.sh → fail → ...  (6-9 사이클)
-Student:        [Overmind FIXES 수신] → config.toml 선제 수정 → start.sh → done  (1-2 사이클)
-```
-
-| 지표 | Pioneer | Student (+OM) | Naive | Student vs Naive |
-|------|:-------:|:-------------:|:-----:|:----------------:|
-| **선제적 수정** | No | **Yes** | No | 결정적 차이 |
-| **start.sh 실행** | 6-9 | **1-2** | 6-9 | **~75% 감소** |
-| **src/ 파일 분석** | 다수 | **최소** | 다수 | diff에서 획득 |
-
-> **한 에이전트의 시행착오(diff)가 다른 에이전트의 선제적 수정을 유도한다.**
-> 핵심은 "무엇을 고쳤는가"(what)가 아니라 "어떻게 고쳤는가"(diff)의 전파.
-
-### Overmind가 전달하는 것
+### Overmind가 전달하는 것 (사실 기반, 행동 지시 없음)
 
 ```
-FIXES BY TEAMMATES — Another agent already solved these problems.
-Apply these fixes BEFORE running or testing the project:
+[OVERMIND] Team context from other agents on this repo.
+
+TEAMMATE CHANGES — What other agents changed (with diffs):
 - Modified config.toml (1 file)
-  Diff: +[server]\n+host = "0.0.0.0"\n+port = 3000\n+env = "development"
-- Modified config.toml (1 file)
-  Diff: +[session]\n+store = "memory"\n+ttl_seconds = 3600
-  ...
+  Diff: +[server]\n+host = "localhost"\n+port = 3000\n+env = "development"
+  (by agent_pioneer)
 ```
 
-상세 결과와 JSONL 분석: [`docs/benchmark-ab-test.md`](docs/benchmark-ab-test.md)
+> **핵심 원칙**: Formatter는 **사실만 전달**한다. "Apply ALL fixes" 같은 행동 지시는 테스트를 강제하는 장치이지 Overmind의 자연스러운 기능이 아니다.
+
+### 모델별 특성
+
+| 모델 | 패턴 | Overmind 효과 |
+|------|------|-------------|
+| **haiku** | 순차 발견 (7-8회 실행) | tool_uses 감소 측정 가능 |
+| **sonnet** | 1-2회 만에 해결 | 천장 효과 — 이미 최적 |
+
+상세 결과와 설계 원칙: [`docs/benchmark-ab-test.md`](docs/benchmark-ab-test.md)
 
 실행 방법:
 ```bash

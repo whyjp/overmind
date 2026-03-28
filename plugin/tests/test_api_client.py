@@ -57,7 +57,7 @@ class TestFileToScope:
 
     def test_root_file(self):
         from api_client import file_to_scope
-        assert file_to_scope("README.md") == "README.md"
+        assert file_to_scope("README.md") == "*"
 
     def test_windows_backslash(self):
         from api_client import file_to_scope

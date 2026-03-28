@@ -51,12 +51,43 @@ def normalize_git_remote(url: str) -> str:
     return url
 
 
+def _git_root() -> str | None:
+    """Get git repository root directory, cached."""
+    if not hasattr(_git_root, "_cache"):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5,
+            )
+            _git_root._cache = result.stdout.strip().replace("\\", "/") if result.returncode == 0 else None
+        except Exception:
+            _git_root._cache = None
+    return _git_root._cache
+
+
 def file_to_scope(file_path: str) -> str:
-    """Convert file path to scope glob pattern. e.g. 'src/auth/login.ts' -> 'src/auth/*'."""
-    parts = file_path.replace("\\", "/").rsplit("/", 1)
-    if len(parts) == 2:
+    """Convert file path to scope glob pattern relative to git root.
+
+    e.g. '/abs/path/repo/src/auth/login.ts' -> 'src/auth/*'
+         'config.toml' -> '*'
+    """
+    path = file_path.replace("\\", "/")
+
+    # Make relative to git root if absolute
+    root = _git_root()
+    if root and path.startswith(root):
+        path = path[len(root):].lstrip("/")
+    elif root:
+        # Try case-insensitive match (Windows)
+        root_lower = root.lower()
+        path_lower = path.lower()
+        if path_lower.startswith(root_lower):
+            path = path[len(root):].lstrip("/")
+
+    parts = path.rsplit("/", 1)
+    if len(parts) == 2 and parts[0]:
         return parts[0] + "/*"
-    return file_path
+    return "*"
 
 
 def get_user() -> str:

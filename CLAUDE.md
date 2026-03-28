@@ -32,9 +32,10 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 110개 전부 pass
-- Server: 51개 (models 7 + store 11 + api 11 + mcp 3 + scenarios 19)
-- Plugin: 59개 (api_client 20 + flush_logic 14 + formatter 14 + hooks 11)
+**Tests**: 135+ pass
+- Server: 61개 (models 7 + store 11 + api 13 + mcp 4 + scenarios 26)
+- Plugin: 74개 (api_client 20 + flush_logic 14 + formatter 20 + context_writer 9 + diff_collector 6 + hooks 11 중 일부 환경 의존)
+- E2E Live: 3개 시나리오 (AB, AB_multistage, AB_complex) — `claude` CLI 필요
 
 **Docs**:
 - `docs/prd.md` — PRD
@@ -92,8 +93,9 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 # Server
 cd server && uv sync --all-extras && uv run python -m overmind.main
 
-# Tests
+# Tests (server 61 + plugin 74)
 cd server && uv run pytest tests/ -v
+cd plugin && python -m pytest tests/ -v
 
 # Dashboard
 # http://localhost:7777/dashboard (서버 실행 후)

@@ -94,3 +94,37 @@ class TestWriteContextFile:
         content = output.read_text(encoding="utf-8")
         assert "old content" not in content
         assert "# Overmind Team Context" in content
+
+    def test_diff_events_in_separate_section(self, tmp_path):
+        """Events with diffs get their own section with formatted diff blocks."""
+        output = tmp_path / ".claude" / "overmind-context.md"
+        events = [
+            {"type": "change", "result": "Modified config.toml (1 file)\nDiff:\n+[server]\n+port = 3000",
+             "user": "pioneer", "ts": "2026-03-28T10:00:00Z", "scope": "*", "summary": None},
+            {"type": "discovery", "result": "Found endpoint issue",
+             "user": "dev_b", "ts": "2026-03-28T11:00:00Z", "scope": "src/api/*", "summary": None},
+        ]
+        write_context_file(events, output)
+        content = output.read_text(encoding="utf-8")
+
+        assert "## Teammate Changes (with diffs)" in content
+        assert "```diff" in content
+        assert "+[server]" in content
+        assert "## Discoveries" in content
+        assert "Found endpoint issue" in content
+
+    def test_diff_events_before_regular(self, tmp_path):
+        """Diff section appears before regular type sections."""
+        output = tmp_path / ".claude" / "overmind-context.md"
+        events = [
+            {"type": "change", "result": "Modified file\nDiff:\n+line",
+             "user": "a", "ts": "2026-03-28T10:00:00Z", "scope": "*", "summary": None},
+            {"type": "correction", "result": "Fix this",
+             "user": "b", "ts": "2026-03-28T11:00:00Z", "scope": "*", "summary": None},
+        ]
+        write_context_file(events, output)
+        content = output.read_text(encoding="utf-8")
+
+        diff_pos = content.index("## Teammate Changes")
+        corr_pos = content.index("## Corrections")
+        assert diff_pos < corr_pos
