@@ -34,10 +34,11 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 204+ pass
-- Server: 88개 (models 12 + store 22 + api 13 + mcp 6 + scenarios 28 + summary 2 + 기타)
-- Plugin: 116개 (api_client 27 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 18 + hooks 11 + 기타)
-- E2E Live: 3개 시나리오 (AB, AB_multistage, AB_complex) — `claude` CLI 필요
+**Tests**: 207+ pass
+- Server: 90개 (models 12 + store 30 + api 13 + mcp 6 + scenarios 28 + summary 2)
+- Plugin: 117개 (api_client 27 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
+- E2E Live: 3+3 시나리오 (기존 AB 3개 + statistical parametrized 3개) — `claude` CLI 필요
+- Statistical AB: `--student-n N --naive-m M --agent-model MODEL` pytest 옵션
 
 **Docs**:
 - `docs/prd.md` — PRD
@@ -46,20 +47,12 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - `docs/design/phase1-design.md` — Phase 1 설계 스펙
 - `docs/plans/phase1-implementation.md` — Phase 1 구현 플랜 (11 tasks)
 
-### 남은 작업
+### Statistical AB 벤치마크 인사이트
 
-**검증**:
-- ~~실제 2인 환경에서 push/pull 사이클 검증~~ ✅
-- ~~Plugin 실제 설치 테스트~~ ✅
-- ~~SessionEnd push 내용 개선~~ ✅ PostToolUse로 세션 중 변경 자동 push, SessionEnd는 잔여 flush만
-- ~~테스트 보강~~ ✅ Plugin 59개 + Server 51개 = 110개 테스트
-
-### 설계 인사이트 (반영 완료)
-
-- ~~Pull 응답 최적화 (delta-only pull)~~ ✅ `since` 파라미터 + `last_pull_ts` 상태 추적으로 구현 완료
-- ~~`detail` 파라미터~~ ✅ `?detail=summary|full` 구현 완료
-- ~~서머리 생성~~ ✅ SummaryGenerator Protocol 구현 완료
-- ~~urgent → high_priority 네이밍~~ ✅ 코드 전체 리네이밍 완료 (Priority = "normal" | "high_priority")
+현재 scaffold(simple 3단계, multistage 9단계)에서는 Student와 Naive 간 **차이 없음**. 단계 수보다 **문제의 복잡도**가 Overmind 효과를 결정:
+- 에러 메시지가 솔루션을 직접 가리키면 LLM이 Overmind 없이도 풀어버림
+- 상호의존성, misleading errors, 다단계 추론이 필요한 트랩이어야 차이 발생
+- 벤치마크 상세: `docs/benchmark-ab-test.md`
 
 ### Phase 2 계획 (A/B 병렬, 동등 우선순위)
 

@@ -336,6 +336,64 @@ done
 
 ---
 
+## Statistical AB Results (2026-03-29, N=2 M=2, haiku)
+
+Statistical test framework (`test_live_agents_AB_statistical.py`)로 Pioneer 1회 후 Student x2 + Naive x2 병렬 실행.
+
+### Simple Scaffold (3단계)
+
+```
+  Metric                          Pioneer  Student(avg)   Naive(avg)
+  server_run_attempts                   2           2.0          2.0
+  config_toml_edits                     1           1.0          1.0
+  proactive_config_fix              False            0%           0%
+  elapsed (s)                       29.7s         25.1s        23.3s
+```
+
+**결과: Overmind 효과 없음.** Haiku가 3단계 트랩을 iterative discovery로 즉시 해결.
+
+### Multistage Scaffold (9단계)
+
+```
+  Metric                          Pioneer  Student(avg)   Naive(avg)
+  server_run_attempts                   7           7.0          7.0
+  config_toml_edits                     5           6.0          5.5
+  proactive_config_fix              False            0%           0%
+  elapsed (s)                      100.9s         70.8s        61.1s
+```
+
+**결과: Overmind 효과 없음.** 단계 수가 많아도 각 트랩이 "config section 추가"의 반복이라 패턴이 단순. LLM이 에러 메시지만으로 충분히 해결 가능.
+
+### 핵심 인사이트
+
+**단계의 깊이보다 문제의 복잡도가 중요.** Overmind가 차이를 만들려면:
+- 에러 메시지만으로 해결책 유추 불가한 트랩
+- A를 고치면 B가 깨지는 상호의존 구조
+- 에러가 실제 원인과 다른 곳을 가리키는 misleading errors
+- 여러 파일을 cross-reference해야 하는 다단계 추론
+
+기존 v1 벤치마크에서 27% 시간 절감이 관측된 것은, 당시 Student가 diff 기반 FIXES를 받아 **전체 소스 선행 분석** 행동 변화를 보였기 때문. 하지만 트랩 자체가 단순하면 이 행동 변화가 실행 횟수 감소로 이어지지 않음.
+
+### Reproduction
+
+```bash
+cd server
+
+# Simple, N=2 M=2, haiku
+uv run pytest tests/scenarios/test_live_agents_AB_statistical.py \
+  -m e2e_live -s -k simple --student-n 2 --naive-m 2 --agent-model haiku
+
+# Multistage, N=3 M=3, haiku
+uv run pytest tests/scenarios/test_live_agents_AB_statistical.py \
+  -m e2e_live -s -k multistage --student-n 3 --naive-m 3 --agent-model haiku
+
+# All scaffolds
+uv run pytest tests/scenarios/test_live_agents_AB_statistical.py \
+  -m e2e_live -s --student-n 3 --naive-m 3 --agent-model haiku
+```
+
+---
+
 ## Limitations
 
 1. **비결정적**: 실행마다 에이전트 행동이 다름. v2의 `proactive_config_fix`는 가장 결정적 지표이지만 100% 보장은 아님. N회 반복 통계 필요.

@@ -1,6 +1,6 @@
 # Overmind — 다음 세션 브리핑
 
-**마지막 업데이트**: 2026-03-28
+**마지막 업데이트**: 2026-03-29
 **현재 브랜치**: main
 
 ---
@@ -20,22 +20,12 @@
 - [x] SQLite store 이관
 - [x] 피드백 점수 (prevented_error, helpful/irrelevant) 축적
 - [x] Push "why" 보강 (diff_collector + PostToolUse context capture)
-- [ ] PostToolUse lesson 필드 활용 → Phase 3으로 이관
 
 ### Phase 2-B: ✅ 클라이언트 레슨 반영 (완료)
 - [x] `.claude/overmind-context.md` 동기화 (TTL 기반)
 - [x] 구조화된 레슨 포맷 — `StructuredLesson {action, target, reason, replacement}`
 - [x] pull 측 충돌 감지 — `conflict_detector.py` (deny/warn/ignore + legacy scope-aware fallback)
 - [x] `overmind_memory` MCP tool — 팀 메모리 마크다운 조회 (scope 필터 지원)
-- [ ] 장기: Claude Code 플러그인 메모리 API 지원 시 네이티브 통합
-
-### 설계 인사이트: ✅ 모두 반영
-- [x] Delta-only pull (`since` + `last_pull_ts`)
-- [x] `detail` 파라미터
-- [x] 서머리 생성 (SummaryGenerator Protocol)
-- [x] `urgent` → `high_priority` 리네이밍
-- [x] Scope 상대경로 정규화 (git root 기준)
-- [x] Formatter 사실적 표현 전환 (FIXES → TEAMMATE CHANGES)
 
 ### Phase 3: ✅ Branch-Aware Selective Intelligence (완료)
 - [x] Branch metadata: `current_branch`/`base_branch` 자동 감지 + DB 저장
@@ -44,42 +34,78 @@
 - [x] 선택적 수용: formatter PLANNED CHANGES + branch tag
 - [x] Lesson 자동분류: action → event type 매핑
 
+### Statistical AB Test Framework: ✅ 완료
+- [x] ab_scaffolds/ — 3개 scaffold 모듈화 (simple/multistage/complex)
+- [x] ab_runner.py — 공통 agent runner + JSONL 분석 + 통계 리포트
+- [x] pytest 옵션: --student-n, --naive-m, --agent-model
+- [x] test_live_agents_AB_statistical.py — parametrize × scaffold, N/M 병렬 반복
+- [x] conflict_detector require action scope 필터 수정
+
 ---
 
 ## 테스트 현황
 
 | 영역 | 수 | 내역 |
 |------|-----|------|
-| Server | 88 | models 12, store 22, api 13, mcp 6, scenarios 28, summary 2, 기타 |
-| Plugin | 116 | api_client 27, flush 22, formatter 15, context_writer 8, diff_collector 6, conflict_detector 18, hooks 11, 기타 |
-| E2E Live | 3 시나리오 | AB, AB_multistage, AB_complex (`claude` CLI 필요) |
-| **합계** | **204+** | |
+| Server | 90 | models 12, store 22+8(branch), api 13, mcp 6, scenarios 28, summary 2 |
+| Plugin | 117 | api_client 27, flush 22, formatter 15, context_writer 8, diff_collector 6, conflict_detector 19, hooks 11 |
+| E2E Live | 3+3 시나리오 | 기존 AB 3개 + statistical parametrized 3개 (`claude` CLI 필요) |
+| **합계** | **207+** | |
+
+---
+
+## Statistical AB 벤치마크 결과 (2026-03-29)
+
+### 핵심 발견: 단계 수가 아닌 문제 복잡도가 중요
+
+| Scaffold | 단계 | Pioneer runs | Student runs | Naive runs | Overmind 효과 |
+|----------|------|:---:|:---:|:---:|---|
+| simple (N=2,M=2) | 3 | 2 | 2.0 | 2.0 | **없음** — haiku가 바로 풀어버림 |
+| multistage (N=2,M=2) | 9 | 7 | 7.0 | 7.0 | **없음** — 단계만 많고 각 트랩이 단순 |
+
+**분석**: 현재 scaffold의 트랩은 에러 메시지가 솔루션을 직접 가리키고, 각 트랩이 독립적이라 LLM이 iterative discovery로 충분히 해결 가능. Overmind가 차이를 만들려면:
+
+1. **비자명한 트랩** — 에러 메시지만으로는 해결책 유추 불가
+2. **상호의존성** — A를 고치면 B가 깨지는 구조
+3. **잘못된 단서** — 에러가 실제 원인과 다른 곳을 가리킴
+4. **다단계 추론** — 여러 파일/시스템을 cross-reference해야 해결 가능
+
+v1 벤치마크(2026-03-27)에서는 Student가 27% 빠르고 31% 적은 tool uses를 보였는데, 이는 당시 formatter가 "FIXES BY TEAMMATES" 섹션으로 diff를 직접 전달했기 때문. 현재 코드에서도 이 기능은 작동하지만, 트랩 자체가 단순하면 Naive도 빠르게 풀어버림.
 
 ---
 
 ## 다음 세션 추천 작업
 
-### 검증 & 안정화
-1. **Branch-aware A/B 테스트** — 다른 branch에서 작업하는 2+ agent가 intent/discovery를 cross-branch로 공유하는지 E2E 검증
-2. **Dashboard branch 시각화** — Flow View에 branch 정보 표시, branch별 필터
-3. **실 환경 테스트** — 실제 multi-branch 개발 시나리오에서 selective pull 동작 확인
+### 1. 복잡한 scaffold 설계 (최우선)
+현재 scaffold는 "config section 추가" 반복이라 Overmind 가치를 증명하기 어려움. 새 scaffold 필요:
 
-### 확장
-4. **overmind_intent MCP tool** — 명시적 intent push 전용 도구 (scope/files/description)
-5. **Branch merge 감지** — branch가 merge되면 해당 이벤트의 relevance 자동 조정
+**후보 시나리오:**
+- **상호의존 config**: A 값이 B 값에 의존 (e.g., cache TTL < session TTL, port 충돌)
+- **Misleading errors**: 에러가 가리키는 파일과 실제 원인 파일이 다름
+- **환경 간 불일치**: .env + docker-compose.yml + config.toml 간 값 동기화
+- **순서 의존성**: 모듈 초기화 순서에 따라 다른 에러 발생
+- **숨겨진 제약조건**: 소스 코드를 읽어야만 알 수 있는 validation rule
+
+### 2. Branch-aware E2E 검증
+- 다른 branch에서 작업하는 2+ agent가 intent/discovery를 cross-branch로 공유하는지 검증
+- statistical test framework에 branch scenario 추가
+
+### 3. Dashboard branch 시각화
+- Flow View에 branch 정보 표시, branch별 필터
 
 ---
 
-## 핵심 변경 맵 (이번 세션)
+## 핵심 변경 맵 (최근)
 
 | 영역 | 파일 | 변경 |
 |------|------|------|
-| Model | `server/overmind/models.py` | +StructuredLesson, +lesson field on MemoryEvent/PushEventInput |
-| Store | `server/overmind/store.py` | +lesson 컬럼 (DB 스키마 + migration + push/pull 직렬화) |
-| MCP | `server/overmind/mcp_server.py` | +overmind_memory tool, +_format_memory_resource |
-| Hook | `plugin/hooks/on_pre_tool_use.py` | conflict_detector 통합 (deny/warn/ignore) |
-| New | `plugin/scripts/conflict_detector.py` | 구조화된 레슨 기반 충돌 감지 |
-| Rename | 20+ files | Priority "urgent" → "high_priority" |
-| Formatter | `plugin/scripts/formatter.py` | FIXES → TEAMMATE CHANGES (사실적 표현) |
-| Test | `plugin/tests/test_conflict_detector.py` | 18개 테스트 신규 |
-| Test | `server/tests/scenarios/test_hooks_e2e.py` | +structured lesson E2E (prohibit/replace) |
+| Model | `models.py` | +current_branch, +base_branch, +intent type |
+| Store | `store.py` | +branch 컬럼, 3-tier pull relevance |
+| API | `api.py` | +branch/base_branch pull 파라미터 |
+| Plugin | `api_client.py` | +get_current_branch(), +get_base_branch() |
+| Plugin | `on_session_start.py` | branch metadata 자동 첨부 |
+| Plugin | `formatter.py` | +PLANNED CHANGES section, +branch tag |
+| Test | `test_store.py` | +8 branch 테스트 |
+| Infra | `ab_scaffolds/` | 3 scaffold 모듈 추출 |
+| Infra | `ab_runner.py` | 공통 agent runner + 통계 |
+| New | `test_live_agents_AB_statistical.py` | N/M 병렬 통계 테스트 |
