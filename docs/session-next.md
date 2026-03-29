@@ -47,10 +47,11 @@
 
 | 영역 | 수 | 내역 |
 |------|-----|------|
-| Server | 90 | models 12, store 22+8(branch), api 13, mcp 6, scenarios 28, summary 2 |
+| Server | 95 | models 12, store 22+8(branch), api 13, mcp 6, scenarios 28, summary 2, branch_conflict 4 |
+| Scaffold | 11 | branch_conflict check_config 6 + create_scaffold 5 |
 | Plugin | 117 | api_client 27, flush 22, formatter 15, context_writer 8, diff_collector 6, conflict_detector 19, hooks 11 |
-| E2E Live | 3+3 시나리오 | 기존 AB 3개 + statistical parametrized 3개 (`claude` CLI 필요) |
-| **합계** | **207+** | |
+| E2E Live | 3+3+1 시나리오 | 기존 AB 3개 + statistical 3개 + branch-aware 1개 (`claude` CLI 필요) |
+| **합계** | **222+** | |
 
 ---
 
@@ -90,9 +91,15 @@
 - PIONEER_PROMPT 전략 유효: 전문가 시뮬레이션 → 양질의 이벤트 전파
 - 상세: `docs/benchmark-ab-test.md` Nightmare 섹션
 
-### 2. Branch-aware E2E 검증
-- 다른 branch에서 작업하는 2+ agent가 intent/discovery를 cross-branch로 공유하는지 검증
-- statistical test framework에 branch scenario 추가
+### 2. ✅ Branch-aware E2E 검증 (완료)
+- `branch_conflict` scaffold: feat/auth ↔ feat/api 간 3가지 공유 리소스 충돌 트랩
+  - TRAP 1: Port conflict (둘 다 8080 힌트)
+  - TRAP 2: SERVICE_TOKEN 형식 충돌 (HS256 vs UUID)
+  - TRAP 3: Session timeout 상호 배제 (auth ≥ 3600, api ≤ 1800)
+- `test_branch_aware_ab()`: Pioneer(feat/auth) → Student/Naive(feat/api) cross-branch E2E
+- 11 단위 테스트 (check_config 6 + create_scaffold 5)
+- `port_conflict_count` metric 추가
+- 다음: `--student-n 2 --naive-m 2` live AB 테스트 실행
 
 ### 3. Dashboard branch 시각화
 - Flow View에 branch 정보 표시, branch별 필터
@@ -110,6 +117,8 @@
 | Plugin | `on_session_start.py` | branch metadata 자동 첨부 |
 | Plugin | `formatter.py` | +PLANNED CHANGES section, +branch tag |
 | Test | `test_store.py` | +8 branch 테스트 |
-| Infra | `ab_scaffolds/` | 3 scaffold 모듈 추출 |
-| Infra | `ab_runner.py` | 공통 agent runner + 통계 |
-| New | `test_live_agents_AB_statistical.py` | N/M 병렬 통계 테스트 |
+| Infra | `ab_scaffolds/` | 5 scaffold 모듈 (simple, multistage, complex, nightmare, branch_conflict) |
+| Infra | `ab_runner.py` | 공통 agent runner + 통계 + port_conflict_count metric |
+| New | `test_live_agents_AB_statistical.py` | N/M 병렬 통계 테스트 + branch-aware E2E |
+| New | `ab_scaffolds/branch_conflict.py` | cross-branch 3트랩 scaffold (feat/auth ↔ feat/api) |
+| New | `ab_scaffolds/test_branch_conflict.py` | branch_conflict 단위 테스트 11개 |

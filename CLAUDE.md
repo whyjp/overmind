@@ -34,10 +34,11 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 207+ pass
-- Server: 90개 (models 12 + store 30 + api 13 + mcp 6 + scenarios 28 + summary 2)
+**Tests**: 222+ pass
+- Server: 95개 (models 12 + store 30 + api 13 + mcp 6 + scenarios 28 + summary 2 + branch_conflict 4)
 - Plugin: 117개 (api_client 27 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
-- E2E Live: 3+3 시나리오 (기존 AB 3개 + statistical parametrized 3개) — `claude` CLI 필요
+- Scaffold: 11개 (branch_conflict check_config 6 + create_scaffold 5)
+- E2E Live: 3+3+1 시나리오 (기존 AB 3개 + statistical parametrized 3개 + branch-aware 1개) — `claude` CLI 필요
 - Statistical AB: `--student-n N --naive-m M --agent-model MODEL` pytest 옵션
 
 **Docs**:
@@ -52,6 +53,8 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 현재 scaffold(simple 3단계, multistage 9단계)에서는 Student와 Naive 간 **차이 없음**. 단계 수보다 **문제의 복잡도**가 Overmind 효과를 결정:
 - 에러 메시지가 솔루션을 직접 가리키면 LLM이 Overmind 없이도 풀어버림
 - 상호의존성, misleading errors, 다단계 추론이 필요한 트랩이어야 차이 발생
+- **nightmare** scaffold: Student 23% 빠름, 33% vs 0% 성공 (Pioneer 전문가 프롬프트 전략)
+- **branch_conflict** scaffold: cross-branch intent/discovery 공유 검증 (feat/auth ↔ feat/api)
 - 벤치마크 상세: `docs/benchmark-ab-test.md`
 
 ### Phase 2 계획 (A/B 병렬, 동등 우선순위)
@@ -95,7 +98,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 # Server
 cd server && uv sync --all-extras && uv run python -m overmind.main
 
-# Tests (server 88 + plugin 116)
+# Tests (server 95 + scaffold 11 + plugin 117)
 cd server && uv run pytest tests/ -v
 cd server && uv run pytest ../plugin/tests/ -v
 
@@ -134,6 +137,8 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 | `plugin/hooks/on_post_tool_use.py` | PostToolUse 훅: 변경 누적 + batch push |
 | `plugin/scripts/api_client.py` | 훅용 공유 HTTP 클라이언트 + flush 로직 |
 | `plugin/scripts/conflict_detector.py` | 구조화된 레슨 기반 충돌 감지 (deny/warn/ignore) |
+| `server/tests/fixtures/ab_scaffolds/` | AB test scaffold 모듈 (simple, multistage, complex, nightmare, branch_conflict) |
+| `server/tests/fixtures/ab_runner.py` | 공통 agent runner + 통계 분석 |
 | `plugin/tests/` | Plugin 테스트 (api_client, formatter, flush, conflict_detector, hooks) |
 
 ## Conventions
