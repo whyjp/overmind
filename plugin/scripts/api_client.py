@@ -19,15 +19,19 @@ OVERMIND_URL = os.environ.get("OVERMIND_URL", "http://localhost:7777")
 STATE_FILE = Path(os.environ.get("OVERMIND_STATE_FILE", str(Path.home() / ".overmind_state.json")))
 
 
-def get_repo_id() -> str | None:
-    """Derive repo_id from git remote origin URL, or OVERMIND_REPO_ID env var."""
+def get_repo_id(cwd: str | None = None) -> str | None:
+    """Derive repo_id from git remote origin URL, or OVERMIND_REPO_ID env var.
+
+    Args:
+        cwd: Working directory for git command. If None, uses process CWD.
+    """
     env_repo = os.environ.get("OVERMIND_REPO_ID")
     if env_repo:
         return env_repo
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, cwd=cwd,
         )
         if result.returncode != 0:
             return None
@@ -51,18 +55,21 @@ def normalize_git_remote(url: str) -> str:
     return url
 
 
-def _git_root() -> str | None:
-    """Get git repository root directory, cached."""
+def _git_root(cwd: str | None = None) -> str | None:
+    """Get git repository root directory, cached per cwd."""
+    cache_key = cwd or "__default__"
     if not hasattr(_git_root, "_cache"):
+        _git_root._cache = {}
+    if cache_key not in _git_root._cache:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, cwd=cwd,
             )
-            _git_root._cache = result.stdout.strip().replace("\\", "/") if result.returncode == 0 else None
+            _git_root._cache[cache_key] = result.stdout.strip().replace("\\", "/") if result.returncode == 0 else None
         except Exception:
-            _git_root._cache = None
-    return _git_root._cache
+            _git_root._cache[cache_key] = None
+    return _git_root._cache[cache_key]
 
 
 def file_to_scope(file_path: str) -> str:
@@ -95,12 +102,16 @@ def get_user() -> str:
     return os.environ.get("OVERMIND_USER", os.environ.get("USER", os.environ.get("USERNAME", "unknown")))
 
 
-def get_current_branch() -> str | None:
-    """Get current git branch name. Returns None if detached HEAD."""
+def get_current_branch(cwd: str | None = None) -> str | None:
+    """Get current git branch name. Returns None if detached HEAD.
+
+    Args:
+        cwd: Working directory for git command. If None, uses process CWD.
+    """
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, cwd=cwd,
         )
         if result.returncode != 0:
             return None
@@ -110,11 +121,14 @@ def get_current_branch() -> str | None:
         return None
 
 
-def get_base_branch() -> str | None:
+def get_base_branch(cwd: str | None = None) -> str | None:
     """Detect the base branch this branch forked from.
 
     Checks OVERMIND_BASE_BRANCH env var first, then tries main/master
     by looking for a common ancestor.
+
+    Args:
+        cwd: Working directory for git command. If None, uses process CWD.
     """
     env_base = os.environ.get("OVERMIND_BASE_BRANCH")
     if env_base:
@@ -123,7 +137,7 @@ def get_base_branch() -> str | None:
         try:
             result = subprocess.run(
                 ["git", "merge-base", candidate, "HEAD"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, cwd=cwd,
             )
             if result.returncode == 0:
                 return candidate

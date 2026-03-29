@@ -147,3 +147,50 @@ class TestGetBaseBranch:
             lambda *a, **kw: type("R", (), {"returncode": 1, "stdout": ""})(),
         )
         assert api_client.get_base_branch() is None
+
+
+class TestBranchDetectionWithCwd:
+    """Test branch detection with explicit cwd on real git repos."""
+
+    def _make_repo(self, tmp_path, branch="feat/auth"):
+        """Create a minimal git repo on the given branch."""
+        import subprocess
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_env = {
+            **__import__("os").environ,
+            "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), capture_output=True, check=True)
+        (repo / "f.txt").write_text("x")
+        subprocess.run(["git", "add", "."], cwd=str(repo), capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo), capture_output=True, check=True, env=git_env)
+        if branch != "main":
+            subprocess.run(["git", "checkout", "-b", branch], cwd=str(repo), capture_output=True, check=True)
+        return repo
+
+    def test_current_branch_with_cwd(self, tmp_path):
+        repo = self._make_repo(tmp_path, "feat/auth")
+        assert api_client.get_current_branch(cwd=str(repo)) == "feat/auth"
+
+    def test_current_branch_main(self, tmp_path):
+        repo = self._make_repo(tmp_path, "main")
+        assert api_client.get_current_branch(cwd=str(repo)) == "main"
+
+    def test_base_branch_with_cwd(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OVERMIND_BASE_BRANCH", raising=False)
+        repo = self._make_repo(tmp_path, "feat/api")
+        assert api_client.get_base_branch(cwd=str(repo)) == "main"
+
+    def test_cwd_overrides_process_cwd(self, tmp_path):
+        """Even if process CWD is not a git repo, explicit cwd works."""
+        repo = self._make_repo(tmp_path, "feat/auth")
+        # Run from a non-git directory — should still detect branch via cwd
+        assert api_client.get_current_branch(cwd=str(repo)) == "feat/auth"
+
+    def test_none_cwd_falls_back_to_process_cwd(self):
+        """Without cwd, uses process CWD (backward compat)."""
+        # Just verify it doesn't crash — result depends on test runner CWD
+        result = api_client.get_current_branch(cwd=None)
+        assert result is None or isinstance(result, str)

@@ -27,9 +27,10 @@ def main():
     user = get_user()
     state = load_state()
 
-    # Detect and cache branch info
-    current_branch = get_current_branch()
-    base_branch = get_base_branch()
+    # Detect and cache branch info (explicit cwd for robustness)
+    project_dir = str(Path.cwd())
+    current_branch = get_current_branch(cwd=project_dir)
+    base_branch = get_base_branch(cwd=project_dir)
     state["current_branch"] = current_branch
     state["base_branch"] = base_branch
 

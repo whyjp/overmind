@@ -50,9 +50,11 @@ class TestPostToolUseHook:
 
     def test_multiple_accumulations(self, plugin_env, tmp_state_file):
         """Multiple PostToolUse calls accumulate in state."""
-        # Pre-populate state with last_push_ts to prevent immediate flush
+        from datetime import datetime, timezone
+        # Use recent timestamp to prevent time-based flush trigger
+        now = datetime.now(timezone.utc).isoformat()
         tmp_state_file.write_text(json.dumps({
-            "last_push_ts": "2026-03-27T10:00:00Z",
+            "last_push_ts": now,
             "pending_changes": []
         }))
 
