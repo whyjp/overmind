@@ -319,7 +319,7 @@ def create_scaffold(base_dir: Path, branch: str = "main") -> Path:
         "GIT_COMMITTER_EMAIL": "test@test.com",
     }
     subprocess.run(
-        ["git", "init"], cwd=str(repo_dir), capture_output=True, check=True
+        ["git", "init", "-b", "main"], cwd=str(repo_dir), capture_output=True, check=True
     )
     subprocess.run(
         ["git", "add", "."], cwd=str(repo_dir), capture_output=True, check=True
