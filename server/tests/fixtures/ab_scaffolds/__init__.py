@@ -8,11 +8,12 @@ Each scaffold module exposes:
   MAX_TURNS: int
   create_scaffold(base_dir: Path) -> Path
 """
-from . import simple, multistage
+from . import simple, multistage, nightmare
 from . import complex as complex_
 
 SCAFFOLDS: dict = {
     "simple": simple,
     "multistage": multistage,
     "complex": complex_,
+    "nightmare": nightmare,
 }
