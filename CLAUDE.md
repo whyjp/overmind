@@ -50,12 +50,22 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 
 ### Statistical AB 벤치마크 인사이트
 
-현재 scaffold(simple 3단계, multistage 9단계)에서는 Student와 Naive 간 **차이 없음**. 단계 수보다 **문제의 복잡도**가 Overmind 효과를 결정:
+단계 수보다 **문제의 복잡도**가 Overmind 효과를 결정:
 - 에러 메시지가 솔루션을 직접 가리키면 LLM이 Overmind 없이도 풀어버림
 - 상호의존성, misleading errors, 다단계 추론이 필요한 트랩이어야 차이 발생
 - **nightmare** scaffold: Student 23% 빠름, 33% vs 0% 성공 (Pioneer 전문가 프롬프트 전략)
 - **branch_conflict** scaffold: cross-branch intent/discovery 공유 검증 (feat/auth ↔ feat/api)
 - 벤치마크 상세: `docs/benchmark-ab-test.md`
+
+**Deprecated scaffolds** (simple, multistage, complex): Overmind 효과 측정 불가로 레지스트리에서 제거. 파일은 참고용 보존.
+
+### AB Scaffold 설계 기준 (새 scaffold 추가 시 필수)
+
+새 AB test scaffold는 아래 조건을 **모두** 충족해야 함. 하나라도 미충족 시 Overmind 효과 측정 불가:
+1. **Misleading error**: 에러 메시지 ≠ 실제 원인 (LLM이 에러만 보고 못 풀어야 함)
+2. **Cross-file 의존성**: 단일 파일 수정으로 해결 불가 (최소 2개 파일 연동)
+3. **누적/상호배타 제약**: A→B→C 순서 의존 또는 상호 배타 조건 (port 충돌, 토큰 포맷 등)
+4. **정량 측정 가능**: server_run_attempts, proactive_config_fix, success_rate 등 명확한 메트릭 차이 예상
 
 ### Phase 2 계획 (A/B 병렬, 동등 우선순위)
 
@@ -143,6 +153,7 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 
 ## Conventions
 
+- **인코딩: UTF-8** — 모든 Python(`.py`) 및 Node/JS(`.js`, `.ts`) 파일은 반드시 UTF-8로 작성. subprocess 호출 시 `encoding="utf-8"` 명시
 - Line endings: LF (소스), CRLF (batch) — `.gitattributes`에서 관리
 - `core.autocrlf = false`
 - 커밋 메시지: conventional commits (feat/fix/refactor/chore/docs)

@@ -1,5 +1,14 @@
 # server/tests/fixtures/ab_scaffolds/multistage.py
-"""Scaffold data for the A/B Multi-Stage Failure Cascade scenario (Node.js)."""
+"""DEPRECATED: Overmind 효과 없음 — 반복 패턴이라 학습 불필요.
+
+단계 수(9)는 많지만 동일 패턴 반복이라 Pioneer 지식 없이도 LLM이 해결.
+Overmind 가치 측정에는 misleading error + cross-file 의존성 + 누적 수정이 필수.
+비슷한 반복형 scaffold 재생성 금지 — nightmare/branch_conflict 수준의 복잡도 필요.
+
+See: docs/benchmark-ab-test.md (Statistical AB 벤치마크 인사이트)
+
+---
+Original: Scaffold data for the A/B Multi-Stage Failure Cascade scenario (Node.js)."""
 
 import os
 import subprocess

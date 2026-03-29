@@ -1,4 +1,13 @@
-"""Scaffold data for the A/B Complex 8-Stage Failure Cascade test."""
+"""DEPRECATED: Overmind 효과 미미 — 상호의존성 있으나 에러 메시지가 직관적.
+
+8개 모듈이지만 에러가 솔루션을 직접 가리키므로 Pioneer 지식이 큰 도움이 안 됨.
+Overmind 가치 측정에는 misleading error가 핵심 — 에러 메시지 ≠ 실제 원인이어야 함.
+비슷한 직관적-에러 scaffold 재생성 금지 — nightmare/branch_conflict 수준의 복잡도 필요.
+
+See: docs/benchmark-ab-test.md (Statistical AB 벤치마크 인사이트)
+
+---
+Original: Scaffold data for the A/B Complex 8-Stage Failure Cascade test."""
 
 import os
 import subprocess

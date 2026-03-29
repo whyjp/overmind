@@ -1,4 +1,15 @@
-"""Simple A/B scaffold: Python server + config.toml with prescriptive errors.
+"""DEPRECATED: Overmind 효과 없음 — LLM이 단독으로 풀어버리는 단순 문제.
+
+Overmind의 가치(cross-agent 지식 전달)를 측정할 수 없는 scaffold.
+misleading error, cross-file 의존성, 누적 수정이 없어 Pioneer 지식이 불필요.
+비슷한 단순 scaffold 재생성 금지 — nightmare/branch_conflict 수준의 복잡도 필요.
+
+See: docs/benchmark-ab-test.md (Statistical AB 벤치마크 인사이트)
+
+---
+Original description:
+
+Simple A/B scaffold: Python server + config.toml with prescriptive errors.
 
 Scenario:
   A Python HTTP server reads config.toml for startup configuration.
