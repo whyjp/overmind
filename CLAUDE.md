@@ -34,10 +34,10 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직, 명시적 cwd 기반 branch 감지
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 241 pass (server 119 + plugin 122)
-- Server: 119개 (models 12 + store 30 + api 14 + mcp 6 + scenarios 28 + summary 2 + nightmare 18 + branch_conflict 11) — 6 deselected (e2e_live/multi_agent 마커)
+**Tests**: 256 pass (server 134 + plugin 122)
+- Server: 134개 (models 12 + store 30 + api 14 + mcp 6 + scenarios 28 + summary 2 + nightmare 18 + branch_conflict 11 + microservices 15) — 4 deselected (e2e_live/multi_agent 마커)
 - Plugin: 122개 (api_client 32 + flush_logic 22 + formatter 15 + context_writer 10 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
-- E2E Live: 2 시나리오 (nightmare + branch_conflict) — `claude` CLI 필요
+- E2E Live: 3 시나리오 (nightmare + branch_conflict + microservices) — `claude` CLI 필요
 - Statistical AB: `--student-n N --naive-m M --agent-model MODEL` pytest 옵션
 - **Deprecated scaffolds**: simple/multistage/complex — Overmind 효과 측정 불가로 레지스트리에서 제거 (파일 참고용 보존)
 
@@ -147,7 +147,7 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 | `plugin/hooks/on_post_tool_use.py` | PostToolUse 훅: 변경 누적 + batch push |
 | `plugin/scripts/api_client.py` | 훅용 공유 HTTP 클라이언트 + flush 로직 |
 | `plugin/scripts/conflict_detector.py` | 구조화된 레슨 기반 충돌 감지 (deny/warn/ignore) |
-| `server/tests/fixtures/ab_scaffolds/` | AB test scaffold 모듈 — active: nightmare, branch_conflict (deprecated: simple, multistage, complex) |
+| `server/tests/fixtures/ab_scaffolds/` | AB test scaffold 모듈 — active: nightmare, branch_conflict, microservices (deprecated: simple, multistage, complex) |
 | `server/tests/fixtures/ab_runner.py` | 공통 agent runner + 통계 분석 |
 | `plugin/tests/` | Plugin 테스트 (api_client, formatter, flush, conflict_detector, hooks) |
 

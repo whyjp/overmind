@@ -16,12 +16,13 @@ Scaffold design criteria (새 scaffold 추가 시 필수 충족):
   - 누적 수정: A→B→C 순서 의존 또는 상호 배타 제약
   - 단순 반복 패턴 금지: LLM이 혼자 풀 수 있는 문제는 가치 없음
 """
-from . import nightmare, branch_conflict
+from . import nightmare, branch_conflict, microservices
 
 # Active scaffolds — Overmind 효과 측정 가능
 SCAFFOLDS: dict = {
     "nightmare": nightmare,
     "branch_conflict": branch_conflict,
+    "microservices": microservices,
 }
 
 # Deprecated scaffolds — Overmind 효과 없음, 참고용으로만 보존
