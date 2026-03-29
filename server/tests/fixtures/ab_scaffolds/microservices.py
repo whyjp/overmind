@@ -176,7 +176,7 @@ token_hash = "{_WRONG_HASH}"
 """,
 
     # ── Source files (read-only) ──────────────────────────────────────
-    "src/orchestrator.py": r'''"""Microservices orchestrator — boots services in dependency order."""
+    "src/orchestrator.py": r'''"""Microservices orchestrator -- boots services in dependency order."""
 import sys
 import os
 import json
@@ -290,15 +290,16 @@ def check_dependencies(configs):
     for node in graph:
         if node not in visited:
             if dfs(node, []):
-                cycle_str = " -> ".join(cycle_path)
-                print(f"STARTUP FAILED: circular dependency detected: {cycle_str}")
+                # MISLEADING: sounds like a timeout/deadlock, doesn't show the cycle
+                print(f"STARTUP FAILED: service initialization timed out after 10s "
+                      f"-- possible resource contention between services. "
+                      f"Check service logs for deadlock indicators.")
                 sys.exit(1)
 
 
 def check_port_connectivity(configs):
     """Verify upstream port references match service configs."""
     for name, cfg in configs.items():
-        upstreams = {k: v for k, v in cfg.items() if k.startswith("upstream.")}
         for key, upstream_cfg in cfg.items():
             if not key.startswith("upstream"):
                 continue
@@ -309,8 +310,10 @@ def check_port_connectivity(configs):
             if target_name in configs:
                 actual_port = configs[target_name].get("server", {}).get("port")
                 if expected_port and actual_port and expected_port != actual_port:
-                    print(f"STARTUP FAILED: {name} expects {target_name} on port "
-                          f"{expected_port}, but {target_name} listens on {actual_port}")
+                    # MISLEADING: blames auth service health, doesn't mention ports
+                    print(f"STARTUP FAILED: {target_name} service health check failed "
+                          f"-- connection refused at configured endpoint. "
+                          f"Verify {target_name} service is running and network is reachable.")
                     sys.exit(1)
 
 
@@ -327,9 +330,9 @@ def check_retry_budget(configs):
     timeout = gateway_cfg.get("timeout", {}).get("max_seconds", 60)
 
     if budget >= timeout:
-        print(f"STARTUP FAILED: worker retry budget ({retries} retries × "
-              f"{poll_interval}s interval = {budget}s) exceeds gateway "
-              f"timeout ({timeout}s)")
+        # MISLEADING: sounds like worker crashed, doesn't reveal the math
+        print(f"STARTUP FAILED: worker process terminated unexpectedly "
+              f"during queue initialization -- healthcheck deadline exceeded")
         sys.exit(1)
 
 
@@ -346,20 +349,25 @@ def check_cluster_tokens(configs, env):
             mismatched.append(name)
 
     if mismatched:
-        print(f"STARTUP FAILED: cluster token mismatch between services "
-              f"({', '.join(mismatched)} differ from .env CLUSTER_TOKEN)")
+        # MISLEADING: sounds like crypto/format issue, doesn't identify which service
+        print(f"STARTUP FAILED: inter-service authentication failed "
+              f"-- cluster handshake rejected by peer (HMAC verification error)")
         sys.exit(1)
 
 
 def check_auth_env(configs, env):
-    """Verify auth service can find its JWT secret via env mapping."""
+    """Verify auth service can find its JWT secret."""
     auth_cfg = configs.get("auth", {})
     jwt_env_key = auth_cfg.get("jwt", {}).get("env_key", "")
     if jwt_env_key:
-        value = resolve_env(env, jwt_env_key)
+        # BUG (intentional trap): checks .env directly, ignores env_mapping.json
+        # auth.toml says env_key="AUTH_SECRET", .env has JWT_SECRET (not AUTH_SECRET)
+        # env_mapping.json maps JWT_SECRET→AUTH_SECRET but this code doesn't use it
+        value = env.get(jwt_env_key)
         if not value:
-            print(f"STARTUP FAILED: auth service requires {jwt_env_key} "
-                  f"but it is not resolvable through env_mapping.json")
+            # MISLEADING: vague "security credential" error, doesn't name the variable
+            print(f"STARTUP FAILED: auth service initialization failed "
+                  f"-- required security credential not available in runtime environment")
             sys.exit(1)
 
 
@@ -543,21 +551,14 @@ def check_config(repo_dir: Path) -> dict:
         and gateway_auth_port == auth_port
     )
 
-    # T2: Env mapping — auth needs AUTH_SECRET resolvable
+    # T2: Env mapping — orchestrator checks .env DIRECTLY for AUTH_SECRET
+    # Fix: rename JWT_SECRET→AUTH_SECRET in .env, or change auth.toml env_key
     auth_env_key = (configs.get("auth", {})
                     .get("jwt", {})
                     .get("env_key", ""))
     if auth_env_key:
-        # Check if any mapping source→target where target==auth_env_key has source in env
-        resolved = False
-        for source, target in mapping.items():
-            if target == auth_env_key and source in env:
-                resolved = True
-                break
-        # Also check direct presence
-        if auth_env_key in env:
-            resolved = True
-        result["env_mapping_ok"] = resolved
+        # Must match orchestrator behavior: direct .env lookup, no mapping
+        result["env_mapping_ok"] = auth_env_key in env
     else:
         result["env_mapping_ok"] = True
 

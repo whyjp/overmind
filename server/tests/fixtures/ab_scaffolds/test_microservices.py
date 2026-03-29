@@ -17,19 +17,22 @@ class TestCheckConfig:
         return create_scaffold(tmp_path)
 
     def test_initial_state_all_not_ok(self, repo: Path):
-        """Fresh scaffold should have multiple failures."""
+        """Fresh scaffold should have ALL 5 traps failing."""
         result = check_config(repo)
         assert not result["all_ok"]
-        # Specific traps that should fail in initial state
         assert not result["ports_ok"], "T1: port mismatch should be detected"
+        assert not result["env_mapping_ok"], "T2: AUTH_SECRET missing from .env"
         assert not result["retry_budget_ok"], "T3: retry budget should exceed timeout"
         assert not result["no_cycle"], "T4: circular dependency should be detected"
         assert not result["cluster_token_ok"], "T5: worker token hash should mismatch"
 
-    def test_env_mapping_ok_initial(self, repo: Path):
-        """T2: env_mapping should resolve in initial state (JWT_SECRET exists in .env)."""
+    def test_fix_env_mapping(self, repo: Path):
+        """T2: adding AUTH_SECRET to .env resolves auth credential check."""
+        env_file = repo / ".env"
+        content = env_file.read_text(encoding="utf-8")
+        content += "AUTH_SECRET=super-secret-jwt-key-2026\n"
+        env_file.write_text(content, encoding="utf-8")
         result = check_config(repo)
-        # JWT_SECRET is in .env, mapping says JWT_SECRET→AUTH_SECRET, source exists
         assert result["env_mapping_ok"]
 
     def test_fix_ports(self, repo: Path):
@@ -77,7 +80,7 @@ class TestCheckConfig:
         assert result["cluster_token_ok"]
 
     def test_fully_fixed_state(self, repo: Path):
-        """All traps fixed → all_ok = True."""
+        """All 5 traps fixed → all_ok = True."""
         import hashlib
 
         correct_hash = hashlib.sha256(b"hive-cluster-secret-2026").hexdigest()
@@ -88,6 +91,12 @@ class TestCheckConfig:
         content = auth_toml.read_text(encoding="utf-8")
         content = content.replace("port = 8082", "port = 8081")
         auth_toml.write_text(content, encoding="utf-8")
+
+        # T2: fix env mapping — add AUTH_SECRET to .env
+        env_file = repo / ".env"
+        env_content = env_file.read_text(encoding="utf-8")
+        env_content += "AUTH_SECRET=super-secret-jwt-key-2026\n"
+        env_file.write_text(env_content, encoding="utf-8")
 
         # T3: fix retry budget
         worker_toml = repo / "services" / "worker.toml"
@@ -145,12 +154,19 @@ class TestCreateScaffold:
         correct_hash = hashlib.sha256(b"hive-cluster-secret-2026").hexdigest()
         wrong_hash = hashlib.sha256(b"old-cluster-token").hexdigest()
 
-        # Apply all fixes
+        # T1: fix port
         auth_toml = repo / "services" / "auth.toml"
         content = auth_toml.read_text(encoding="utf-8")
         content = content.replace("port = 8082", "port = 8081")
         auth_toml.write_text(content, encoding="utf-8")
 
+        # T2: fix env mapping
+        env_file = repo / ".env"
+        env_content = env_file.read_text(encoding="utf-8")
+        env_content += "AUTH_SECRET=super-secret-jwt-key-2026\n"
+        env_file.write_text(env_content, encoding="utf-8")
+
+        # T3+T4+T5: fix worker
         worker_toml = repo / "services" / "worker.toml"
         content = worker_toml.read_text(encoding="utf-8")
         content = content.replace("max_retries = 10", "max_retries = 3")

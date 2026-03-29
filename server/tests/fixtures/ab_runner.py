@@ -243,12 +243,16 @@ def analyze_conversation(events: list[dict]) -> dict:
                 elif tool in ("Edit", "Write"):
                     fp = inp.get("file_path", "").replace("\\", "/")
                     edited_files.append(fp)
-                    # Track config file edits (config.toml, .env, secrets/, registry.json)
+                    # Track config file edits (config.toml, .env, secrets/, registry.json,
+                    # services/*.toml, env_mapping.json — microservices scaffold)
                     is_config_file = (
                         "config.toml" in fp
                         or fp.endswith("/.env")
+                        or fp.endswith(".env")
                         or "/secrets/" in fp
                         or "registry.json" in fp
+                        or "/services/" in fp
+                        or "env_mapping.json" in fp
                     )
                     if is_config_file and first_config_edit_step is None:
                         first_config_edit_step = step
@@ -267,7 +271,7 @@ def analyze_conversation(events: list[dict]) -> dict:
                 )
                 if "Error" in txt or "Traceback" in txt or "STARTUP FAILED" in txt or "assert" in txt.lower():
                     saw_error = True
-                if "[Hive] Server running" in txt or "[Hive] Server ready" in txt:
+                if "[Hive] Server running" in txt or "[Hive] Server ready" in txt or "All services running" in txt:
                     saw_server_running = True
 
             msg = evt.get("message", {})
@@ -279,7 +283,7 @@ def analyze_conversation(events: list[dict]) -> dict:
                     if isinstance(content, str):
                         if "Error" in content or "Traceback" in content or "STARTUP FAILED" in content or "assert" in content.lower():
                             saw_error = True
-                        if "[Hive] Server running" in content or "[Hive] Server ready" in content:
+                        if "[Hive] Server running" in content or "[Hive] Server ready" in content or "All services running" in content:
                             saw_server_running = True
 
     config_edits = [f for f in edited_files if "config.toml" in f]
@@ -287,8 +291,11 @@ def analyze_conversation(events: list[dict]) -> dict:
         f for f in edited_files
         if "config.toml" in f
         or f.endswith("/.env")
+        or f.endswith(".env")
         or "/secrets/" in f
         or "registry.json" in f
+        or "/services/" in f
+        or "env_mapping.json" in f
     ]
     src_edits = [
         f for f in edited_files
