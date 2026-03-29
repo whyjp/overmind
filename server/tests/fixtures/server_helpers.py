@@ -87,6 +87,7 @@ def run_hook(script_name: str, env: dict, stdin_data: str = "") -> str:
         input=stdin_data,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=10,
         env=env,
         cwd=str(PLUGIN_DIR),

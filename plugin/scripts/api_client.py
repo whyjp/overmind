@@ -31,7 +31,7 @@ def get_repo_id(cwd: str | None = None) -> str | None:
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", timeout=5, cwd=cwd,
         )
         if result.returncode != 0:
             return None
@@ -64,7 +64,7 @@ def _git_root(cwd: str | None = None) -> str | None:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, timeout=5, cwd=cwd,
+                capture_output=True, text=True, encoding="utf-8", timeout=5, cwd=cwd,
             )
             _git_root._cache[cache_key] = result.stdout.strip().replace("\\", "/") if result.returncode == 0 else None
         except Exception:
@@ -111,7 +111,7 @@ def get_current_branch(cwd: str | None = None) -> str | None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", timeout=5, cwd=cwd,
         )
         if result.returncode != 0:
             return None
@@ -137,7 +137,7 @@ def get_base_branch(cwd: str | None = None) -> str | None:
         try:
             result = subprocess.run(
                 ["git", "merge-base", candidate, "HEAD"],
-                capture_output=True, text=True, timeout=5, cwd=cwd,
+                capture_output=True, text=True, encoding="utf-8", timeout=5, cwd=cwd,
             )
             if result.returncode == 0:
                 return candidate

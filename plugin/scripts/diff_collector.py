@@ -12,7 +12,7 @@ def collect_diff_summary(files: list[str], cwd: str | None = None, max_lines: in
     try:
         result = subprocess.run(
             ["git", "diff", "HEAD", "--unified=0", "--no-color", "--"] + files,
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", timeout=5, cwd=cwd,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return ""

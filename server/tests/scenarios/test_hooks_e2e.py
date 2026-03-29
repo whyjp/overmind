@@ -154,6 +154,7 @@ class TestSessionStartHook:
             input="",
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             env=env,
             cwd=str(project_root),
