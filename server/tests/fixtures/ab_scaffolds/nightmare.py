@@ -31,18 +31,26 @@ SHARED_PROMPT = (
     "Do NOT modify files under src/ or create new files."
 )
 
-# Pioneer gets a smarter prompt that guides systematic investigation.
-# The VALUE is that this structured approach (read source → map dependencies →
-# fix holistically) gets propagated to Students via Overmind, while Naives
-# are left doing blind trial-and-error with SHARED_PROMPT.
+# Pioneer simulates an expert who already knows the solution space.
+# In real teams, someone has already solved the problem — Overmind propagates
+# their knowledge automatically. The test measures: does that propagation
+# actually help Students avoid the trial-and-error that Naives must endure?
 PIONEER_PROMPT = (
-    "Get the Hive server running. "
-    "Run `bash start.sh` to see the first error. "
-    "IMPORTANT: Before fixing anything, read the source files under src/ to understand "
-    "the full validation chain and dependencies between config files. "
-    "Map out which config values depend on each other across config.toml, .env, "
-    "secrets/hmac.key, and plugins/registry.json. "
-    "Then fix ALL issues at once rather than one at a time. "
+    "Get the Hive server running. Here's what you need to know:\n\n"
+    "1. .env has a placeholder DATABASE_URL — change it to postgresql://localhost:5432/hive\n"
+    "2. SECRET_KEY in .env and secrets/hmac.key must match: "
+    "hmac.key must contain the SHA256 hex digest of SECRET_KEY. "
+    "Set SECRET_KEY to something strong, then compute its sha256 hexdigest for hmac.key.\n"
+    "3. config.toml is missing several sections. Add:\n"
+    "   - [session] with timeout = 3600\n"
+    "   - [cache] with ttl_seconds < session.timeout (e.g. 1800), backend = 'memory', max_items = 1000\n"
+    "   - [server] port = 8080\n"
+    "   - [metrics] port = 9090, enabled = true (port must differ from server)\n"
+    "   - [health] port = 9091, interval_seconds = 30 (port must differ from both)\n"
+    "   - [plugins] enabled = true, registry_path = 'plugins/registry.json'\n"
+    "4. Add PLUGIN_PATH=./plugins to .env\n"
+    "5. In plugins/registry.json, add 'enabled': true to each plugin entry.\n\n"
+    "Fix all of these, then run `bash start.sh` to verify.\n"
     "You may edit config.toml, .env, secrets/hmac.key, plugins/registry.json. "
     "Do NOT modify files under src/ or create new files."
 )
