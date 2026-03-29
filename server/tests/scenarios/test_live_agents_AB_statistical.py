@@ -3,9 +3,14 @@
 Runs real Claude CLI agents against each scaffold, collecting JSONL logs.
 Reports mean/median/stddev per metric for statistical comparison.
 
+Model-tier strategy: Pioneer uses a smarter model (--pioneer-model, default sonnet)
+with the SAME prompt as Student/Naive. The smarter model naturally produces better
+insights, which Overmind propagates to Students (cheaper model). This proves
+Overmind's real value: cross-model knowledge transfer.
+
 Usage:
   pytest tests/scenarios/test_live_agents_AB_statistical.py -m e2e_live -s \
-    --student-n 3 --naive-m 3 --agent-model haiku
+    --student-n 3 --naive-m 3 --agent-model haiku --pioneer-model sonnet
 
   # Single scaffold:
   pytest ... -k simple --student-n 5 --naive-m 5
@@ -27,6 +32,18 @@ from tests.fixtures.ab_scaffolds import SCAFFOLDS
 from tests.fixtures.server_helpers import ServerThread
 
 OVERMIND_PORT = int(os.environ.get("TEST_OVERMIND_PORT", "17990"))
+
+# Model tier: if pioneer-model not set, auto-upgrade from agent-model
+_MODEL_UPGRADES = {"haiku": "sonnet", "": "sonnet"}
+
+
+def _resolve_pioneer_model(request) -> str:
+    """Resolve pioneer model: explicit --pioneer-model > auto-upgrade from --agent-model."""
+    pioneer = request.config.getoption("--pioneer-model")
+    if pioneer:
+        return pioneer
+    agent = request.config.getoption("--agent-model")
+    return _MODEL_UPGRADES.get(agent, agent)
 
 
 @pytest.fixture(scope="module")
@@ -61,8 +78,11 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
     state_dir = tmp_path / "states"
     state_dir.mkdir()
 
+    pioneer_model = _resolve_pioneer_model(request)
+
     print(f"\n{'=' * 70}")
-    print(f"  Statistical A/B: {scaffold_name} (N={N}, M={M}, model={model or 'default'})")
+    print(f"  Statistical A/B: {scaffold_name} (N={N}, M={M}, "
+          f"pioneer={pioneer_model or 'default'}, student/naive={model or 'default'})")
     print(f"{'=' * 70}")
 
     # Create scaffolds: 1 pioneer + N students + M naives (each independent git repo)
@@ -73,16 +93,13 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
         repos[f"naive_{i}"] = scaffold.create_scaffold(tmp_path / f"naive_{i}")
     print(f"  Created {1 + N + M} scaffold repos")
 
-    # Phase 1: Pioneer (sequential)
-    # Use PIONEER_PROMPT if scaffold provides one (smarter approach for complex scenarios),
-    # otherwise fall back to SHARED_PROMPT
-    pioneer_prompt = getattr(scaffold, "PIONEER_PROMPT", scaffold.SHARED_PROMPT)
-    print(f"\n  Phase 1: Pioneer (prompt={'PIONEER' if pioneer_prompt != scaffold.SHARED_PROMPT else 'SHARED'})")
+    # Phase 1: Pioneer — smarter model, same prompt as everyone else
+    print(f"\n  Phase 1: Pioneer (model={pioneer_model or 'default'}, prompt=SHARED)")
     pioneer = run_agent(
-        prompt=pioneer_prompt, cwd=repos["pioneer"],
+        prompt=scaffold.SHARED_PROMPT, cwd=repos["pioneer"],
         user="pioneer", state_file=state_dir / "state_pioneer.json",
         base_url=base_url, repo_id=scaffold.REPO_ID,
-        max_turns=scaffold.MAX_TURNS, with_overmind=True, model=model,
+        max_turns=scaffold.MAX_TURNS, with_overmind=True, model=pioneer_model,
     )
     print(f"  Pioneer: {pioneer.elapsed:.1f}s, runs={pioneer.analysis['server_run_attempts']}, "
           f"success={pioneer.analysis['saw_server_running']}")
@@ -169,6 +186,7 @@ def test_branch_aware_ab(claude_cli, server, base_url, tmp_path, request):
     N = request.config.getoption("--student-n")
     M = request.config.getoption("--naive-m")
     model = request.config.getoption("--agent-model")
+    pioneer_model = _resolve_pioneer_model(request)
     scaffold = branch_conflict
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
@@ -176,7 +194,8 @@ def test_branch_aware_ab(claude_cli, server, base_url, tmp_path, request):
     state_dir.mkdir()
 
     print(f"\n{'=' * 70}")
-    print(f"  Branch-Aware A/B: branch_conflict (N={N}, M={M}, model={model or 'default'})")
+    print(f"  Branch-Aware A/B: branch_conflict (N={N}, M={M}, "
+          f"pioneer={pioneer_model or 'default'}, student/naive={model or 'default'})")
     print(f"{'=' * 70}")
 
     # Create scaffolds on different branches
@@ -192,13 +211,13 @@ def test_branch_aware_ab(claude_cli, server, base_url, tmp_path, request):
         )
     print(f"  Created {1 + N + M} scaffold repos (pioneer=feat/auth, rest=feat/api)")
 
-    # Phase 1: Pioneer on feat/auth
-    print(f"\n  Phase 1: Pioneer (feat/auth, prompt=PIONEER)")
+    # Phase 1: Pioneer on feat/auth — smarter model, same SHARED prompt
+    print(f"\n  Phase 1: Pioneer (feat/auth, model={pioneer_model or 'default'}, prompt=SHARED)")
     pioneer = run_agent(
-        prompt=scaffold.PIONEER_PROMPT, cwd=repos["pioneer"],
+        prompt=scaffold.SHARED_PROMPT, cwd=repos["pioneer"],
         user="pioneer", state_file=state_dir / "state_pioneer.json",
         base_url=base_url, repo_id=scaffold.REPO_ID,
-        max_turns=scaffold.MAX_TURNS, with_overmind=True, model=model,
+        max_turns=scaffold.MAX_TURNS, with_overmind=True, model=pioneer_model,
     )
     print(f"  Pioneer: {pioneer.elapsed:.1f}s, runs={pioneer.analysis['server_run_attempts']}, "
           f"success={pioneer.analysis['saw_server_running']}")

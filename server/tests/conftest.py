@@ -20,7 +20,9 @@ def pytest_addoption(parser):
     parser.addoption("--naive-m", type=int, default=3,
                      help="Number of naive (no-Overmind) iterations for statistical tests")
     parser.addoption("--agent-model", type=str, default="",
-                     help="Claude model for all agents (haiku/sonnet/opus)")
+                     help="Claude model for student/naive agents (haiku/sonnet/opus)")
+    parser.addoption("--pioneer-model", type=str, default="",
+                     help="Claude model for pioneer agent (default: sonnet if --agent-model is haiku)")
 
 
 @pytest.fixture
