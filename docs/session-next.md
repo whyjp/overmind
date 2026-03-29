@@ -56,21 +56,20 @@
 
 ## Statistical AB 벤치마크 결과 (2026-03-29)
 
-### 핵심 발견: 단계 수가 아닌 문제 복잡도가 중요
+### 핵심 발견: 문제 복잡도 + Pioneer 프롬프트 전략이 핵심
 
-| Scaffold | 단계 | Pioneer runs | Student runs | Naive runs | Overmind 효과 |
+| Scaffold | 트랩 | Pioneer 프롬프트 | Student elapsed | Naive elapsed | Overmind 효과 |
 |----------|------|:---:|:---:|:---:|---|
-| simple (N=2,M=2) | 3 | 2 | 2.0 | 2.0 | **없음** — haiku가 바로 풀어버림 |
-| multistage (N=2,M=2) | 9 | 7 | 7.0 | 7.0 | **없음** — 단계만 많고 각 트랩이 단순 |
+| simple (N=2,M=2) | 3 | SHARED | 25.1s | 23.3s | **없음** — 단순 트랩 |
+| multistage (N=2,M=2) | 9 | SHARED | 70.8s | 61.1s | **없음** — 반복 패턴 |
+| **nightmare (N=3,M=3)** | **5** | **PIONEER** | **103.1s** | **133.4s** | **-23% 시간, 33% vs 0% 성공** |
 
-**분석**: 현재 scaffold의 트랩은 에러 메시지가 솔루션을 직접 가리키고, 각 트랩이 독립적이라 LLM이 iterative discovery로 충분히 해결 가능. Overmind가 차이를 만들려면:
+**Nightmare 핵심 지표 (N=3, M=3, haiku)**:
+- **saw_server_running**: Student 33% vs Naive 0% — Student만 성공
+- **elapsed**: 103.1s vs 133.4s → **23% 빠름**
+- **config_file_edits**: 8.7 vs 13.7 → **36% 적음**
 
-1. **비자명한 트랩** — 에러 메시지만으로는 해결책 유추 불가
-2. **상호의존성** — A를 고치면 B가 깨지는 구조
-3. **잘못된 단서** — 에러가 실제 원인과 다른 곳을 가리킴
-4. **다단계 추론** — 여러 파일/시스템을 cross-reference해야 해결 가능
-
-v1 벤치마크(2026-03-27)에서는 Student가 27% 빠르고 31% 적은 tool uses를 보였는데, 이는 당시 formatter가 "FIXES BY TEAMMATES" 섹션으로 diff를 직접 전달했기 때문. 현재 코드에서도 이 기능은 작동하지만, 트랩 자체가 단순하면 Naive도 빠르게 풀어버림.
+**인사이트**: Pioneer를 "이미 문제를 풀어본 전문가"로 시뮬레이션하면, 양질의 해결 과정이 Overmind로 Student에게 자동 전파됨. 단순 반복 트랩에서는 효과 없지만, 상호의존 + misleading errors + 다단계 추론이 결합된 복잡한 문제에서 가치 발현.
 
 ---
 
@@ -86,9 +85,10 @@ v1 벤치마크(2026-03-27)에서는 Student가 27% 빠르고 31% 적은 tool us
 - 18 tests, check_config() scoring, analyze_conversation multi-file 확장
 - 다음: `--student-n 3 --naive-m 3` live AB 테스트로 30%+ 차이 검증
 
-### 1b. Nightmare Live AB 테스트 (다음 최우선)
-- `cd server && uv run pytest tests/scenarios/test_live_agents_AB_statistical.py -k nightmare --student-n 3 --naive-m 3 -v`
-- 목표: Student의 server_run_attempts가 Naive보다 30%+ 적음, proactive_config_fix 50%+
+### 1b. ✅ Nightmare Live AB 테스트 (완료)
+- N=3, M=3 haiku: Student 23% 빠름, 33% vs 0% 성공률, 36% 적은 config 수정
+- PIONEER_PROMPT 전략 유효: 전문가 시뮬레이션 → 양질의 이벤트 전파
+- 상세: `docs/benchmark-ab-test.md` Nightmare 섹션
 
 ### 2. Branch-aware E2E 검증
 - 다른 branch에서 작업하는 2+ agent가 intent/discovery를 cross-branch로 공유하는지 검증
