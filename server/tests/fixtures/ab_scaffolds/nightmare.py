@@ -466,5 +466,119 @@ def create_scaffold(base_dir: Path) -> Path:
 
 
 def check_config(repo_dir: Path) -> dict:
-    """Placeholder config checker — to be implemented for scoring."""
-    return {}
+    """Validate the current state of all nightmare scaffold config files.
+
+    Returns a dict with boolean checks for each trap area plus an ``all_ok`` flag.
+    """
+    import hashlib
+    import json
+
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    # -- Load .env --
+    env: dict[str, str] = {}
+    env_path = repo_dir / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                env[key.strip()] = value.strip()
+
+    # -- Load config.toml --
+    config: dict = {}
+    config_path = repo_dir / "config.toml"
+    if config_path.exists():
+        try:
+            config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # -- db_ok: DATABASE_URL has valid scheme --
+    db_url = env.get("DATABASE_URL", "")
+    scheme = db_url.split("://")[0] if "://" in db_url else ""
+    db_ok = scheme in ("postgresql", "postgres", "mysql", "sqlite")
+
+    # -- auth_ok: hmac.key == sha256(SECRET_KEY) --
+    secret_key = env.get("SECRET_KEY", "")
+    hmac_path = repo_dir / "secrets" / "hmac.key"
+    hmac_content = hmac_path.read_text(encoding="utf-8").strip() if hmac_path.exists() else ""
+    if secret_key and hmac_content:
+        expected_hmac = hashlib.sha256(secret_key.encode()).hexdigest()
+        auth_ok = hmac_content == expected_hmac
+    else:
+        auth_ok = False
+
+    # -- session_ok: [session] exists with timeout >= 60 --
+    session = config.get("session", {})
+    session_timeout = session.get("timeout")
+    session_ok = isinstance(session_timeout, int) and session_timeout >= 60
+
+    # -- cache_ok: depends on session_ok, ttl > 0, ttl < timeout, valid backend --
+    cache = config.get("cache", {})
+    ttl = cache.get("ttl_seconds")
+    backend = cache.get("backend", "")
+    cache_ok = False
+    if session_ok and isinstance(ttl, int) and ttl > 0 and ttl < session_timeout:
+        if backend == "redis":
+            cache_ok = bool(cache.get("redis_url"))
+        elif backend == "memory":
+            max_items = cache.get("max_items")
+            cache_ok = isinstance(max_items, int) and max_items > 0
+        # else: cache_ok stays False
+
+    # -- ports_ok: server/metrics/health all have int ports, all different, extra checks --
+    ports_ok = False
+    if all(s in config for s in ("server", "metrics", "health")):
+        server_port = config["server"].get("port")
+        metrics_port = config["metrics"].get("port")
+        health_port = config["health"].get("port")
+        metrics_enabled = config["metrics"].get("enabled")
+        health_interval = config["health"].get("interval_seconds")
+
+        all_int = all(isinstance(p, int) for p in (server_port, metrics_port, health_port))
+        all_different = len({server_port, metrics_port, health_port}) == 3 if all_int else False
+        enabled_bool = isinstance(metrics_enabled, bool)
+        interval_valid = isinstance(health_interval, int) and health_interval > 0
+
+        ports_ok = all_int and all_different and enabled_bool and interval_valid
+
+    # -- plugins_ok: [plugins].enabled, registry_path exists, PLUGIN_PATH, registry entries have 'enabled' --
+    plugins_ok = False
+    plugins_cfg = config.get("plugins", {})
+    if plugins_cfg.get("enabled") is True:
+        registry_rel = plugins_cfg.get("registry_path", "")
+        registry_abs = repo_dir / registry_rel if registry_rel else None
+        plugin_path_env = env.get("PLUGIN_PATH", "")
+        plugin_dir = repo_dir / plugin_path_env if plugin_path_env else None
+
+        if (
+            registry_abs
+            and registry_abs.exists()
+            and plugin_dir
+            and plugin_dir.exists()
+        ):
+            try:
+                registry = json.loads(registry_abs.read_text(encoding="utf-8"))
+                entries = registry.get("plugins", [])
+                if entries and all("enabled" in p for p in entries):
+                    plugins_ok = True
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    all_ok = db_ok and auth_ok and session_ok and cache_ok and ports_ok and plugins_ok
+
+    return {
+        "db_ok": db_ok,
+        "auth_ok": auth_ok,
+        "session_ok": session_ok,
+        "cache_ok": cache_ok,
+        "ports_ok": ports_ok,
+        "plugins_ok": plugins_ok,
+        "all_ok": all_ok,
+    }

@@ -16,6 +16,7 @@ from tests.fixtures.ab_scaffolds.nightmare import (
     REPO_NAME,
     SCAFFOLD_FILES,
     SHARED_PROMPT,
+    check_config,
     create_scaffold,
 )
 
@@ -308,3 +309,137 @@ registry_path = "plugins/registry.json"
         rc, stdout, stderr = _run_server(nightmare_repo)
         assert rc == 0, f"Expected success but got rc={rc}\nstdout: {stdout}\nstderr: {stderr}"
         assert "Configuration validated successfully" in stdout
+
+
+# ---------------------------------------------------------------------------
+# analyze_conversation multi-file config tracking tests
+# ---------------------------------------------------------------------------
+
+
+from tests.fixtures.ab_runner import analyze_conversation
+
+
+class TestAnalyzeConversationMultiFile:
+    def test_tracks_env_edit(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/.env", "old_string": "x", "new_string": "y"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_file_edits"] >= 1
+
+    def test_tracks_hmac_key_edit(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "input": {"file_path": "/tmp/hive/secrets/hmac.key", "content": "abc"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_file_edits"] >= 1
+
+    def test_tracks_registry_json_edit(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/plugins/registry.json", "old_string": "x", "new_string": "y"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_file_edits"] >= 1
+
+    def test_proactive_config_fix_includes_env(self):
+        events = [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/.env", "old_string": "x", "new_string": "y"}}
+            ]}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "bash start.sh"}}
+            ]}},
+        ]
+        result = analyze_conversation(events)
+        assert result["proactive_config_fix"] is True
+
+    def test_config_toml_edits_still_tracked_separately(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/config.toml", "old_string": "x", "new_string": "y"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_toml_edits"] >= 1
+        assert result["config_file_edits"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# check_config tests
+# ---------------------------------------------------------------------------
+
+
+class TestNightmareCheckConfig:
+    """Validate the check_config helper against initial and fully-fixed states."""
+
+    @pytest.fixture()
+    def repo(self, tmp_path):
+        return create_scaffold(tmp_path)
+
+    def test_initial_state_all_not_ok(self, repo):
+        result = check_config(repo)
+        assert result["db_ok"] is False
+        assert result["auth_ok"] is False
+        assert result["session_ok"] is False
+        assert result["cache_ok"] is False
+        assert result["ports_ok"] is False
+        assert result["plugins_ok"] is False
+        assert result["all_ok"] is False
+
+    def test_fully_fixed_state(self, repo):
+        import hashlib
+        import json
+
+        # Fix .env
+        secret = "my-production-secret-key-2026"
+        hmac_hex = hashlib.sha256(secret.encode()).hexdigest()
+        (repo / ".env").write_text(
+            f"DATABASE_URL=postgresql://localhost:5432/hive\n"
+            f"SECRET_KEY={secret}\n"
+            f"NODE_ENV=development\n"
+            f"PLUGIN_PATH=./plugins\n",
+            encoding="utf-8",
+        )
+        # Fix secrets/hmac.key
+        (repo / "secrets" / "hmac.key").write_text(hmac_hex, encoding="utf-8")
+        # Fix registry.json
+        reg_path = repo / "plugins" / "registry.json"
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
+        reg["plugins"][0]["enabled"] = True
+        reg_path.write_text(json.dumps(reg, indent=2), encoding="utf-8")
+        # Fix config.toml — add all missing sections
+        (repo / "config.toml").write_text(
+            """[database]
+pool_size = 5
+timeout = 30
+
+[auth]
+algorithm = "HS256"
+token_expiry = 3600
+
+[session]
+timeout = 3600
+
+[cache]
+ttl_seconds = 1800
+backend = "memory"
+max_items = 1000
+
+[server]
+port = 8080
+
+[metrics]
+port = 9090
+enabled = true
+
+[health]
+port = 9091
+interval_seconds = 30
+
+[plugins]
+enabled = true
+registry_path = "plugins/registry.json"
+""",
+            encoding="utf-8",
+        )
+
+        result = check_config(repo)
+        assert result["all_ok"] is True, f"Failed: {result}"
