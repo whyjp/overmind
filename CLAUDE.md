@@ -38,7 +38,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - Server: 95개 (models 12 + store 30 + api 13 + mcp 6 + scenarios 28 + summary 2 + branch_conflict 4)
 - Plugin: 117개 (api_client 27 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
 - Scaffold: 11개 (branch_conflict check_config 6 + create_scaffold 5)
-- E2E Live: 3+3+1 시나리오 (기존 AB 3개 + statistical parametrized 3개 + branch-aware 1개) — `claude` CLI 필요
+- E2E Live: 4+1 시나리오 (statistical parametrized 4개 + branch-aware 1개) — `claude` CLI 필요
 - Statistical AB: `--student-n N --naive-m M --agent-model MODEL` pytest 옵션
 
 **Docs**:

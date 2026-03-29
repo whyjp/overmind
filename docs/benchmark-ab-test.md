@@ -257,42 +257,12 @@ assert not check_src_modified(repo_dir)
 
 ## Reproduction
 
-### 기본 실행
-
-```bash
-cd server
-
-# Default model
-uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
-
-# Haiku model
-AGENT_MODEL=haiku uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
-
-# Sonnet model
-AGENT_MODEL=sonnet uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
-```
-
-### 다중 실행 (일관성 검증)
-
-```bash
-for i in $(seq 1 10); do
-  echo "=== Run $i ==="
-  AGENT_MODEL=haiku uv run pytest tests/scenarios/test_live_agents_AB_multistage.py \
-    -m e2e_live -s 2>&1 | tee "ab_multi_haiku_run${i}.log"
-done
-```
-
-### JSONL 분석
-
-```bash
-python tests/scenarios/analyze_ab_jsonl.py <state_dir>
-python tests/scenarios/analyze_ab_jsonl.py <state_dir> --json  # machine-readable
-```
+모든 벤치마크는 `test_live_agents_AB_statistical.py` 하나로 실행. (이전 단일 실행 테스트들은 statistical 프레임워크로 대체되어 제거됨.)
 
 ### 요구사항
 
 - `claude` CLI 설치 및 인증
-- Node.js + npm (scaffold 빌드용)
+- Python 3.11+ (scaffold 실행용)
 - Overmind plugin (`plugin/` 디렉토리)
 
 ---
@@ -301,36 +271,27 @@ python tests/scenarios/analyze_ab_jsonl.py <state_dir> --json  # machine-readabl
 
 | Item | Value |
 |------|-------|
-| Date | v1: 2026-03-27, v2: 2026-03-28 |
-| Agent Model | haiku/sonnet (`AGENT_MODEL` 환경변수) |
+| Date | v1: 2026-03-27, v2: 2026-03-28, v3(model-tier): 2026-03-29 |
+| Pioneer Model | sonnet (--pioneer-model, 자동 업그레이드) |
+| Student/Naive Model | haiku (--agent-model) |
 | Platform | Windows 11 Pro |
 | Python | 3.13.12 |
-| Node.js | (system) |
-| Overmind Server | in-process (port 17996) |
+| Overmind Server | in-process (port 17990) |
 | Plugin hooks | SessionStart (pull), PostToolUse (push+diff), PreToolUse (scope 경고), SessionEnd (flush) |
 | FLUSH_THRESHOLD | 1 (즉시 push) |
 | Permission mode | bypassPermissions |
-| max_turns | 30 |
+| max_turns | 30-40 |
 
 ---
 
 ## Extending This Test
 
-### 모델별 비교
-
-```bash
-for model in haiku sonnet opus; do
-  echo "=== $model ==="
-  AGENT_MODEL=$model uv run pytest tests/scenarios/test_live_agents_AB_multistage.py \
-    -m e2e_live -s 2>&1 | tee "ab_multistage_${model}.log"
-done
-```
-
 ### 시나리오 확장 방향
 
 | 시나리오 | 복잡도 | 검증 포인트 |
 |---------|--------|------------|
-| **현재**: config.toml + 6모듈 8단계 cascade | 중-높 | proactive fix + 실행 횟수 감소 |
+| **nightmare**: 5트랩 4파일 misleading errors | 높음 | 성공률 + 시행착오 감소 |
+| **branch_conflict**: cross-branch 3트랩 | 중-높 | cross-branch intent 전파 |
 | **Multi-file edit**: .env + docker-compose.yml + config | 높음 | 여러 파일 lesson 전파 |
 | **Dependency conflict**: npm 버전 충돌 | 높음 | 에러 해석 능력 |
 | **Multi-agent chain**: Pioneer1 -> Pioneer2 -> Student | 높음 | lesson 누적 효과 |

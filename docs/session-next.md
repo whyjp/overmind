@@ -50,7 +50,7 @@
 | Server | 95 | models 12, store 22+8(branch), api 13, mcp 6, scenarios 28, summary 2, branch_conflict 4 |
 | Scaffold | 11 | branch_conflict check_config 6 + create_scaffold 5 |
 | Plugin | 117 | api_client 27, flush 22, formatter 15, context_writer 8, diff_collector 6, conflict_detector 19, hooks 11 |
-| E2E Live | 3+3+1 시나리오 | 기존 AB 3개 + statistical 3개 + branch-aware 1개 (`claude` CLI 필요) |
+| E2E Live | 4+1 시나리오 | statistical 4개 (simple/multistage/complex/nightmare) + branch-aware 1개 (`claude` CLI 필요) |
 | **합계** | **222+** | |
 
 ---
