@@ -27,7 +27,6 @@ from tests.fixtures.ab_runner import (
     AgentSpec, api_get, compute_elapsed_stats, compute_statistics,
     generate_report, print_comparison_table, require_claude_cli,
     run_agent, run_parallel_agents, save_jsonl, save_report,
-    seed_pioneer_events,
 )
 from tests.fixtures.ab_scaffolds import SCAFFOLDS
 from tests.fixtures.server_helpers import ServerThread
@@ -86,75 +85,97 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
           f"pioneer={pioneer_model or 'default'}, student/naive={model or 'default'})")
     print(f"{'=' * 70}")
 
-    # Create scaffolds: 1 pioneer + N students + M naives (each independent git repo)
-    repos = {"pioneer": scaffold.create_scaffold(tmp_path / "pioneer")}
+    # ── Set-based architecture ────────────────────────────────────────
+    # Each set = [Pioneer → Student] with shared repo_id (natural event flow).
+    # Sets run in parallel. Naives run independently (no Overmind).
+    #
+    #   Set 0: Pioneer_0 (repo=set_0) → Student_0 (repo=set_0)
+    #   Set 1: Pioneer_1 (repo=set_1) → Student_1 (repo=set_1)
+    #   ...
+    #   Naive_0, Naive_1, ... (no Overmind, parallel)
+
+    # Create scaffold repos: N sets × (pioneer + student) + M naives
+    repos = {}
     for i in range(N):
-        repos[f"student_{i}"] = scaffold.create_scaffold(tmp_path / f"student_{i}")
+        repos[f"pioneer_{i}"] = scaffold.create_scaffold(tmp_path / f"set_{i}_pioneer")
+        repos[f"student_{i}"] = scaffold.create_scaffold(tmp_path / f"set_{i}_student")
     for i in range(M):
         repos[f"naive_{i}"] = scaffold.create_scaffold(tmp_path / f"naive_{i}")
-    print(f"  Created {1 + N + M} scaffold repos")
+    print(f"  Created {N * 2 + M} scaffold repos ({N} sets + {M} naives)")
 
-    # Phase 1: Pioneer — smarter model, same prompt as everyone else
-    print(f"\n  Phase 1: Pioneer (model={pioneer_model or 'default'}, prompt=SHARED)")
-    pioneer = run_agent(
-        prompt=scaffold.SHARED_PROMPT, cwd=repos["pioneer"],
-        user="pioneer", state_file=state_dir / "state_pioneer.json",
-        base_url=base_url, repo_id=scaffold.REPO_ID,
-        max_turns=scaffold.MAX_TURNS, with_overmind=True, model=pioneer_model,
-    )
-    print(f"  Pioneer: {pioneer.elapsed:.1f}s, runs={pioneer.analysis['server_run_attempts']}, "
-          f"success={pioneer.analysis['saw_server_running']}")
-
-    pull = api_get(base_url, "/api/memory/pull", {"repo_id": scaffold.REPO_ID, "limit": "100"})
-    p_events = [e for e in pull["events"] if e["user"] == "pioneer"]
-    assert len(p_events) >= 1, "Pioneer must push at least 1 event"
-    print(f"  Pioneer pushed {len(p_events)} events")
-
-    # Phase 2: Students (isolated repo_id each) + Naives (parallel, no Overmind)
-    # Each Student gets its own repo_id with only Pioneer's events seeded.
-    # This prevents cross-contamination between Students.
-    student_repo_ids = {}
-    for i in range(N):
-        student_repo_id = f"{scaffold.REPO_ID}/student_{i}"
-        seeded = seed_pioneer_events(base_url, scaffold.REPO_ID, student_repo_id)
-        student_repo_ids[f"student_{i}"] = student_repo_id
-        print(f"  Seeded {seeded} pioneer events → {student_repo_id}")
-
-    print(f"\n  Phase 2: {N} students (isolated) + {M} naives in parallel...")
-    agents = []
-    for i in range(N):
-        agents.append(AgentSpec(
-            name=f"student_{i}", cwd=repos[f"student_{i}"],
-            user=f"student_{i}", state_file=state_dir / f"state_student_{i}.json",
-            with_overmind=True,
-        ))
-    for i in range(M):
-        agents.append(AgentSpec(
-            name=f"naive_{i}", cwd=repos[f"naive_{i}"],
-            user=f"naive_{i}", state_file=state_dir / f"state_naive_{i}.json",
-            with_overmind=False,
-        ))
-
-    # Override: each student uses its own isolated repo_id
-    results: dict = {}
-    # Students + Naives all run in parallel, but with different repo_ids
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    def _run_agent(spec):
-        repo_id = student_repo_ids.get(spec.name, scaffold.REPO_ID)
-        return run_agent(
-            prompt=scaffold.SHARED_PROMPT, cwd=spec.cwd,
-            user=spec.user, state_file=spec.state_file,
-            base_url=base_url, repo_id=repo_id,
-            max_turns=scaffold.MAX_TURNS, with_overmind=spec.with_overmind,
-            model=model,
+    def run_set(set_idx: int) -> tuple:
+        """Run one [Pioneer → Student] set sequentially, sharing repo_id."""
+        set_repo_id = f"{scaffold.REPO_ID}_set_{set_idx}"
+
+        # Pioneer phase
+        p = run_agent(
+            prompt=scaffold.SHARED_PROMPT, cwd=repos[f"pioneer_{set_idx}"],
+            user="pioneer", state_file=state_dir / f"state_pioneer_{set_idx}.json",
+            base_url=base_url, repo_id=set_repo_id,
+            max_turns=scaffold.MAX_TURNS, with_overmind=True, model=pioneer_model,
         )
 
-    with ThreadPoolExecutor(max_workers=len(agents)) as executor:
-        future_to_spec = {executor.submit(_run_agent, s): s for s in agents}
-        for future in as_completed(future_to_spec):
-            spec = future_to_spec[future]
-            results[spec.name] = future.result()
+        # Verify pioneer pushed events
+        pull = api_get(base_url, "/api/memory/pull", {
+            "repo_id": set_repo_id, "limit": "100",
+        })
+        p_events = [e for e in pull["events"] if e["user"] == "pioneer"]
+        p_count = len(p_events)
+
+        # Student phase — same repo_id, sees pioneer's events naturally
+        s = run_agent(
+            prompt=scaffold.SHARED_PROMPT, cwd=repos[f"student_{set_idx}"],
+            user=f"student_{set_idx}",
+            state_file=state_dir / f"state_student_{set_idx}.json",
+            base_url=base_url, repo_id=set_repo_id,
+            max_turns=scaffold.MAX_TURNS, with_overmind=True, model=model,
+        )
+
+        print(f"  Set {set_idx}: Pioneer {p.elapsed:.0f}s/{p.analysis['server_run_attempts']}runs"
+              f"/{p_count}events → Student {s.elapsed:.0f}s/{s.analysis['server_run_attempts']}runs"
+              f"/{'OK' if s.analysis['saw_server_running'] else 'FAIL'}")
+        return p, s, p_count
+
+    def run_naive(naive_idx: int):
+        """Run one Naive agent (no Overmind)."""
+        return run_agent(
+            prompt=scaffold.SHARED_PROMPT, cwd=repos[f"naive_{naive_idx}"],
+            user=f"naive_{naive_idx}",
+            state_file=state_dir / f"state_naive_{naive_idx}.json",
+            base_url=base_url, repo_id=f"{scaffold.REPO_ID}_naive_{naive_idx}",
+            max_turns=scaffold.MAX_TURNS, with_overmind=False, model=model,
+        )
+
+    # Run all sets + naives in parallel
+    print(f"\n  Running {N} sets + {M} naives in parallel...")
+    pioneers = []
+    results = {}
+    total_pioneer_events = 0
+
+    with ThreadPoolExecutor(max_workers=N + M) as executor:
+        set_futures = {executor.submit(run_set, i): i for i in range(N)}
+        naive_futures = {executor.submit(run_naive, i): i for i in range(M)}
+
+        for future in as_completed({**set_futures, **naive_futures}):
+            if future in set_futures:
+                idx = set_futures[future]
+                p, s, p_count = future.result()
+                pioneers.append(p)
+                results[f"student_{idx}"] = s
+                total_pioneer_events += p_count
+            else:
+                idx = naive_futures[future]
+                n = future.result()
+                results[f"naive_{idx}"] = n
+                print(f"  Naive {idx}: {n.elapsed:.0f}s/{n.analysis['server_run_attempts']}runs"
+                      f"/{'OK' if n.analysis['saw_server_running'] else 'FAIL'}")
+
+    assert total_pioneer_events >= N, f"Pioneers must push events (got {total_pioneer_events})"
+
+    # Use first pioneer as representative for the report
+    pioneer = pioneers[0]
 
     # Phase 3: Analyze
     students = [results[f"student_{i}"] for i in range(N)]
