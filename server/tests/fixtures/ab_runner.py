@@ -67,6 +67,40 @@ def api_get(base_url: str, path: str, params: dict | None = None) -> dict:
         return json.loads(resp.read())
 
 
+def api_post(base_url: str, path: str, body: dict) -> dict:
+    """POST JSON to Overmind server, return parsed JSON."""
+    data = json.dumps(body).encode("utf-8")
+    req = Request(
+        f"{base_url}{path}",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read())
+
+
+def seed_pioneer_events(base_url: str, source_repo_id: str, target_repo_id: str) -> int:
+    """Copy Pioneer's events from source_repo_id to target_repo_id.
+
+    This isolates each Student so they only see Pioneer's events,
+    preventing cross-contamination between parallel Students.
+    Returns the number of events seeded.
+    """
+    pull = api_get(base_url, "/api/memory/pull", {
+        "repo_id": source_repo_id, "limit": "200",
+    })
+    events = [e for e in pull.get("events", []) if e.get("user") == "pioneer"]
+    if not events:
+        return 0
+    api_post(base_url, "/api/memory/push", {
+        "repo_id": target_repo_id,
+        "user": "pioneer",
+        "events": events,
+    })
+    return len(events)
+
+
 # ============================================================
 # Agent runner
 # ============================================================

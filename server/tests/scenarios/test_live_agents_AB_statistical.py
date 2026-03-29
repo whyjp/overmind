@@ -27,6 +27,7 @@ from tests.fixtures.ab_runner import (
     AgentSpec, api_get, compute_elapsed_stats, compute_statistics,
     generate_report, print_comparison_table, require_claude_cli,
     run_agent, run_parallel_agents, save_jsonl, save_report,
+    seed_pioneer_events,
 )
 from tests.fixtures.ab_scaffolds import SCAFFOLDS
 from tests.fixtures.server_helpers import ServerThread
@@ -109,8 +110,17 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
     assert len(p_events) >= 1, "Pioneer must push at least 1 event"
     print(f"  Pioneer pushed {len(p_events)} events")
 
-    # Phase 2: Student x N + Naive x M (parallel)
-    print(f"\n  Phase 2: {N} students + {M} naives in parallel...")
+    # Phase 2: Students (isolated repo_id each) + Naives (parallel, no Overmind)
+    # Each Student gets its own repo_id with only Pioneer's events seeded.
+    # This prevents cross-contamination between Students.
+    student_repo_ids = {}
+    for i in range(N):
+        student_repo_id = f"{scaffold.REPO_ID}/student_{i}"
+        seeded = seed_pioneer_events(base_url, scaffold.REPO_ID, student_repo_id)
+        student_repo_ids[f"student_{i}"] = student_repo_id
+        print(f"  Seeded {seeded} pioneer events → {student_repo_id}")
+
+    print(f"\n  Phase 2: {N} students (isolated) + {M} naives in parallel...")
     agents = []
     for i in range(N):
         agents.append(AgentSpec(
@@ -125,11 +135,26 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
             with_overmind=False,
         ))
 
-    results = run_parallel_agents(
-        agents=agents, prompt=scaffold.SHARED_PROMPT,
-        base_url=base_url, repo_id=scaffold.REPO_ID,
-        max_turns=scaffold.MAX_TURNS, model=model,
-    )
+    # Override: each student uses its own isolated repo_id
+    results: dict = {}
+    # Students + Naives all run in parallel, but with different repo_ids
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _run_agent(spec):
+        repo_id = student_repo_ids.get(spec.name, scaffold.REPO_ID)
+        return run_agent(
+            prompt=scaffold.SHARED_PROMPT, cwd=spec.cwd,
+            user=spec.user, state_file=spec.state_file,
+            base_url=base_url, repo_id=repo_id,
+            max_turns=scaffold.MAX_TURNS, with_overmind=spec.with_overmind,
+            model=model,
+        )
+
+    with ThreadPoolExecutor(max_workers=len(agents)) as executor:
+        future_to_spec = {executor.submit(_run_agent, s): s for s in agents}
+        for future in as_completed(future_to_spec):
+            spec = future_to_spec[future]
+            results[spec.name] = future.result()
 
     # Phase 3: Analyze
     students = [results[f"student_{i}"] for i in range(N)]
