@@ -33,6 +33,8 @@ def main():
     base_branch = get_base_branch(cwd=project_dir)
     state["current_branch"] = current_branch
     state["base_branch"] = base_branch
+    # Save branch info immediately so PostToolUse can use it even if pull returns 0
+    save_state(state)
 
     last_pull = state.get("last_pull_ts")
     if not last_pull:

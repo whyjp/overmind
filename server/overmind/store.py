@@ -125,6 +125,10 @@ class SQLiteStore:
             await self.db.execute("ALTER TABLE events ADD COLUMN current_branch TEXT")
         if "base_branch" not in cols:
             await self.db.execute("ALTER TABLE events ADD COLUMN base_branch TEXT")
+        # Create branch index after column is guaranteed to exist
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_repo_branch ON events(repo_id, base_branch)"
+        )
         await self.db.commit()
 
     async def close(self) -> None:
@@ -742,7 +746,6 @@ CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo_id);
 CREATE INDEX IF NOT EXISTS idx_events_repo_ts ON events(repo_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_repo_user ON events(repo_id, user);
 CREATE INDEX IF NOT EXISTS idx_events_repo_scope ON events(repo_id, scope);
-CREATE INDEX IF NOT EXISTS idx_events_repo_branch ON events(repo_id, base_branch);
 
 CREATE TABLE IF NOT EXISTS pull_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
