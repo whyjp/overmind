@@ -200,6 +200,6 @@ class TestModuleExports:
         assert len(microservices.PIONEER_PROMPT) > 0
         assert "start.sh" in microservices.SHARED_PROMPT
 
-    def test_registered_in_scaffolds(self):
+    def test_deprecated_not_in_scaffolds(self):
         from . import SCAFFOLDS
-        assert "microservices" in SCAFFOLDS
+        assert "microservices" not in SCAFFOLDS, "deprecated scaffold should not be in active registry"

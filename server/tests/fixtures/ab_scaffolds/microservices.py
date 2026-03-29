@@ -1,4 +1,21 @@
-"""Microservices scaffold: 3-service dependency resolution with hidden traps.
+"""DEPRECATED: Overmind 효과 역효과 — Pioneer context가 Student를 방해함.
+
+AB 벤치마크 결과 (N=3, M=3, haiku, set-based):
+  Student: 5.3회 시도, 73s / Naive: 2.7회 시도, 50s — Naive가 2배 나음.
+  원인: haiku가 orchestrator.py(300줄) 읽으면 2회만에 해결하는 문제에
+  Pioneer context가 주입되면 비효율적 경로로 유도됨.
+
+유효한 scaffold 설계 교훈:
+  1. 소스 코드가 충분히 복잡해야 함 (LLM이 한번에 파악 불가)
+  2. 트랩이 순차 캐스케이드여야 함 (fix T1 → reveals T2)
+  3. 에러 메시지만으로 해결 불가 + 소스 읽기도 어려워야 Pioneer 지식 필수
+
+See: docs/benchmark-ab-test.md
+
+---
+Original description:
+
+Microservices scaffold: 3-service dependency resolution with hidden traps.
 
 Scenario:
   A Python project simulates 3 microservices (gateway, auth, worker) via

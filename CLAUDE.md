@@ -37,7 +37,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 **Tests**: 256 pass (server 134 + plugin 122)
 - Server: 134개 (models 12 + store 30 + api 14 + mcp 6 + scenarios 28 + summary 2 + nightmare 18 + branch_conflict 11 + microservices 15) — 4 deselected (e2e_live/multi_agent 마커)
 - Plugin: 122개 (api_client 32 + flush_logic 22 + formatter 15 + context_writer 10 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
-- E2E Live: 3 시나리오 (nightmare + branch_conflict + microservices) — `claude` CLI 필요
+- E2E Live: 2 시나리오 (nightmare + branch_conflict) — `claude` CLI 필요
 - Statistical AB: `--student-n N --naive-m M --agent-model MODEL` pytest 옵션
 - **Deprecated scaffolds**: simple/multistage/complex — Overmind 효과 측정 불가로 레지스트리에서 제거 (파일 참고용 보존)
 
@@ -66,6 +66,10 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 2. **Cross-file 의존성**: 단일 파일 수정으로 해결 불가 (최소 2개 파일 연동)
 3. **누적/상호배타 제약**: A→B→C 순서 의존 또는 상호 배타 조건 (port 충돌, 토큰 포맷 등)
 4. **정량 측정 가능**: server_run_attempts, proactive_config_fix, success_rate 등 명확한 메트릭 차이 예상
+5. **소스 코드 복잡도**: 검증 로직이 충분히 복잡해야 함 (LLM이 소스를 읽고 한번에 파악 불가). 300줄 이하 단일 파일은 haiku가 즉시 해독 → Pioneer 지식 불필요
+6. **순차 캐스케이드**: 트랩이 동시에 노출되면 안 됨. fix T1 → reveals T2 구조여야 Pioneer의 순차적 발견이 가치를 가짐
+
+**Deprecated scaffolds 교훈**: microservices(소스 300줄, 동시 에러 노출)에서 Pioneer context가 Student를 오히려 방해 (Naive 2배 나음). 소스 복잡도 + 순차 캐스케이드가 없으면 Overmind context는 해로울 수 있음.
 
 ### Phase 2 계획 (A/B 병렬, 동등 우선순위)
 
@@ -147,7 +151,7 @@ claude mcp add overmind --transport http http://localhost:7777/mcp
 | `plugin/hooks/on_post_tool_use.py` | PostToolUse 훅: 변경 누적 + batch push |
 | `plugin/scripts/api_client.py` | 훅용 공유 HTTP 클라이언트 + flush 로직 |
 | `plugin/scripts/conflict_detector.py` | 구조화된 레슨 기반 충돌 감지 (deny/warn/ignore) |
-| `server/tests/fixtures/ab_scaffolds/` | AB test scaffold 모듈 — active: nightmare, branch_conflict, microservices (deprecated: simple, multistage, complex) |
+| `server/tests/fixtures/ab_scaffolds/` | AB test scaffold 모듈 — active: nightmare, branch_conflict (deprecated: simple, multistage, complex, microservices) |
 | `server/tests/fixtures/ab_runner.py` | 공통 agent runner + 통계 분석 |
 | `plugin/tests/` | Plugin 테스트 (api_client, formatter, flush, conflict_detector, hooks) |
 
