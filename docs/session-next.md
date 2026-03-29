@@ -76,15 +76,19 @@ v1 벤치마크(2026-03-27)에서는 Student가 27% 빠르고 31% 적은 tool us
 
 ## 다음 세션 추천 작업
 
-### 1. 복잡한 scaffold 설계 (최우선)
-현재 scaffold는 "config section 추가" 반복이라 Overmind 가치를 증명하기 어려움. 새 scaffold 필요:
+### 1. ✅ Nightmare Config Scaffold (완료)
+5가지 상호의존 트랩이 있는 복잡한 AB test scaffold 구현 완료:
+- TRAP 1: Misleading error (db.py traceback → 실제 원인은 .env)
+- TRAP 2: Cross-file SHA256 (SECRET_KEY ↔ secrets/hmac.key)
+- TRAP 3: Mutual dependency (cache.ttl < session.timeout)
+- TRAP 4: Three-way port conflict (server/metrics/health)
+- TRAP 5: Three-hop plugin chain (config.toml → registry.json → .env)
+- 18 tests, check_config() scoring, analyze_conversation multi-file 확장
+- 다음: `--student-n 3 --naive-m 3` live AB 테스트로 30%+ 차이 검증
 
-**후보 시나리오:**
-- **상호의존 config**: A 값이 B 값에 의존 (e.g., cache TTL < session TTL, port 충돌)
-- **Misleading errors**: 에러가 가리키는 파일과 실제 원인 파일이 다름
-- **환경 간 불일치**: .env + docker-compose.yml + config.toml 간 값 동기화
-- **순서 의존성**: 모듈 초기화 순서에 따라 다른 에러 발생
-- **숨겨진 제약조건**: 소스 코드를 읽어야만 알 수 있는 validation rule
+### 1b. Nightmare Live AB 테스트 (다음 최우선)
+- `cd server && uv run pytest tests/scenarios/test_live_agents_AB_statistical.py -k nightmare --student-n 3 --naive-m 3 -v`
+- 목표: Student의 server_run_attempts가 Naive보다 30%+ 적음, proactive_config_fix 50%+
 
 ### 2. Branch-aware E2E 검증
 - 다른 branch에서 작업하는 2+ agent가 intent/discovery를 cross-branch로 공유하는지 검증
