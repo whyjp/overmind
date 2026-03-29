@@ -43,7 +43,7 @@ PIONEER_PROMPT = (
     "NODE_ENV=development\n"
     "PLUGIN_PATH=./plugins\n\n"
     "Step 2: Fix secrets/hmac.key — run this command to compute the correct value:\n"
-    "python3 -c \"import hashlib; print(hashlib.sha256(b'overmind-nightmare-secret-2026').hexdigest())\" > secrets/hmac.key\n\n"
+    "python -c \"import hashlib; print(hashlib.sha256(b'overmind-nightmare-secret-2026').hexdigest())\" > secrets/hmac.key\n\n"
     "Step 3: Append these sections to config.toml:\n"
     "[session]\n"
     "timeout = 3600\n\n"
@@ -182,6 +182,7 @@ def main():
     validate_plugins(config)
 
     print("[Hive] Configuration validated successfully")
+    print("[Hive] Server running on http://localhost:8080")
 
 
 if __name__ == "__main__":
