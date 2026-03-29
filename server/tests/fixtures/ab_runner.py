@@ -243,7 +243,14 @@ def analyze_conversation(events: list[dict]) -> dict:
                 elif tool in ("Edit", "Write"):
                     fp = inp.get("file_path", "").replace("\\", "/")
                     edited_files.append(fp)
-                    if "config.toml" in fp and first_config_edit_step is None:
+                    # Track config file edits (config.toml, .env, secrets/, registry.json)
+                    is_config_file = (
+                        "config.toml" in fp
+                        or fp.endswith("/.env")
+                        or "/secrets/" in fp
+                        or "registry.json" in fp
+                    )
+                    if is_config_file and first_config_edit_step is None:
                         first_config_edit_step = step
 
                 elif tool == "Read":
@@ -276,6 +283,13 @@ def analyze_conversation(events: list[dict]) -> dict:
                             saw_server_running = True
 
     config_edits = [f for f in edited_files if "config.toml" in f]
+    config_file_edits = [
+        f for f in edited_files
+        if "config.toml" in f
+        or f.endswith("/.env")
+        or "/secrets/" in f
+        or "registry.json" in f
+    ]
     src_edits = [
         f for f in edited_files
         if "/src/" in f or "/boot/" in f or "/middleware/" in f or "/observability/" in f
@@ -300,6 +314,7 @@ def analyze_conversation(events: list[dict]) -> dict:
         "saw_error": saw_error,
         "saw_server_running": saw_server_running,
         "config_toml_edits": len(config_edits),
+        "config_file_edits": len(config_file_edits),
         "src_file_reads": len(src_reads),
         "src_files_read": src_read_names,
         "src_file_edits": len(src_edits),
@@ -337,6 +352,7 @@ NUMERIC_METRICS = [
     "bash_commands",
     "server_run_attempts",
     "config_toml_edits",
+    "config_file_edits",
     "src_file_reads",
     "src_file_edits",
     "first_config_edit_step",

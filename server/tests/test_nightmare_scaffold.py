@@ -443,3 +443,54 @@ registry_path = "plugins/registry.json"
 
         result = check_config(repo)
         assert result["all_ok"] is True, f"Failed: {result}"
+
+
+# ---------------------------------------------------------------------------
+# analyze_conversation multi-file config tracking tests
+# ---------------------------------------------------------------------------
+
+
+from tests.fixtures.ab_runner import analyze_conversation
+
+
+class TestAnalyzeConversationMultiFile:
+    def test_tracks_env_edit(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/.env", "old_string": "x", "new_string": "y"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_file_edits"] >= 1
+
+    def test_tracks_hmac_key_edit(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "input": {"file_path": "/tmp/hive/secrets/hmac.key", "content": "abc"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_file_edits"] >= 1
+
+    def test_tracks_registry_json_edit(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/plugins/registry.json", "old_string": "x", "new_string": "y"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_file_edits"] >= 1
+
+    def test_proactive_config_fix_includes_env(self):
+        events = [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/.env", "old_string": "x", "new_string": "y"}}
+            ]}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "bash start.sh"}}
+            ]}},
+        ]
+        result = analyze_conversation(events)
+        assert result["proactive_config_fix"] is True
+
+    def test_config_toml_edits_still_tracked_separately(self):
+        events = [{"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "/tmp/hive/config.toml", "old_string": "x", "new_string": "y"}}
+        ]}}]
+        result = analyze_conversation(events)
+        assert result["config_toml_edits"] >= 1
+        assert result["config_file_edits"] >= 1
