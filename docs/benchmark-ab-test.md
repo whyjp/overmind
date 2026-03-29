@@ -472,6 +472,24 @@ cross-branch 시나리오: Pioneer(feat/auth)의 인사이트가 다른 branch(f
 | **서버 실행 횟수** | **-30%** |
 | **config 수정 횟수** | **-25%** |
 
+### Branch-Conflict N=3 M=3 (branch metadata 수정 후, default model, 2026-03-29)
+
+branch metadata 버그 수정 후 첫 검증. Pioneer 이벤트 9/9에 branch metadata 정상 전달됨.
+default model(sonnet)로 실행 — Student/Naive 모두 성공하여 차이 미미.
+
+```
+  Metric                          Pioneer  Student(avg)   Naive(avg)
+  ──────────────────────────────  ───────  ────────────   ──────────
+  server_run_attempts                   2           2.0          2.0
+  config_file_edits                     2           2.3          2.7
+  port_conflict_count                   1           0.0          0.0
+  first_server_run_step                 6           1.0          1.7
+  elapsed (s)                       52.3s         40.5s        41.1s
+  saw_server_running                 True          100%         100%
+```
+
+**참고**: sonnet이 Student/Naive 모두에서 branch_conflict 트랩을 쉽게 해결. **haiku model-tier 재실행**으로 차이 극대화 필요.
+
 ### 왜 Model-Tier가 최적 벤치마크인가
 
 | 항목 | PIONEER_PROMPT 방식 | Model-Tier 방식 |

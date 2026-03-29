@@ -31,12 +31,12 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 - Portable hooks: 크로스 플랫폼 Python 경로 자동 감지
 - Skill: overmind-broadcast, overmind-report
 - Command: /overmind:broadcast
-- API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직
+- API client: urllib 기반 REST 호출, git remote → repo_id 정규화, flush 로직, 명시적 cwd 기반 branch 감지
 - 마켓플레이스 배포 지원 (plugin manifest + hooks.json 스키마)
 
-**Tests**: 222+ pass
+**Tests**: 227+ pass
 - Server: 95개 (models 12 + store 30 + api 13 + mcp 6 + scenarios 28 + summary 2 + branch_conflict 4)
-- Plugin: 117개 (api_client 27 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
+- Plugin: 122개 (api_client 32 + flush_logic 22 + formatter 15 + context_writer 8 + diff_collector 6 + conflict_detector 19 + hooks 11 + 기타)
 - Scaffold: 11개 (branch_conflict check_config 6 + create_scaffold 5)
 - E2E Live: 4+1 시나리오 (statistical parametrized 4개 + branch-aware 1개) — `claude` CLI 필요
 - Statistical AB: `--student-n N --naive-m M --agent-model MODEL` pytest 옵션
@@ -98,7 +98,7 @@ Overmind는 복수의 독립적 Claude Code 인스턴스 간 메모리를 실시
 # Server
 cd server && uv sync --all-extras && uv run python -m overmind.main
 
-# Tests (server 95 + scaffold 11 + plugin 117)
+# Tests (server 95 + scaffold 11 + plugin 122)
 cd server && uv run pytest tests/ -v
 cd server && uv run pytest ../plugin/tests/ -v
 
