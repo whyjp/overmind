@@ -99,24 +99,44 @@ def load_config() -> dict:
     return config
 ''',
     "src/server.py": r'''#!/usr/bin/env python3
-"""Hive Server — validates auth + api modules, checks for conflicts."""
+"""Hive Server — validates modules based on current git branch."""
 
+import subprocess
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config_loader import load_config
-from auth import validate_auth
-from api import validate_api
-from ports import validate_ports
+
+
+def get_branch() -> str:
+    """Detect current git branch."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip() if r.returncode == 0 else "main"
+    except Exception:
+        return "main"
 
 
 def main():
     config = load_config()
+    branch = get_branch()
 
-    validate_auth(config)
-    validate_api(config)
-    validate_ports(config)
+    if branch == "feat/auth" or branch == "main":
+        from auth import validate_auth
+        validate_auth(config)
+
+    if branch == "feat/api" or branch == "main":
+        from api import validate_api
+        validate_api(config)
+
+    # Port conflict only matters when both modules are configured
+    if "auth" in config and "api" in config:
+        from ports import validate_ports
+        validate_ports(config)
 
     print("[Hive] Configuration validated successfully")
     print("[Hive] Server running on http://localhost:8080")
