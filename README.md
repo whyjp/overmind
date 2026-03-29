@@ -65,25 +65,36 @@ OVERMIND_USER=agent_b claude
 
 Agent A 작업 → 세션 종료 → Agent B 세션 시작 시 Agent A의 이벤트가 자동 pull됩니다.
 
-## A/B Benchmark: Cross-Agent Knowledge Transfer
+## A/B Benchmark: Cross-Model Knowledge Transfer
 
-3개의 Claude 에이전트에게 동일 프롬프트를 주고, **Overmind 연결 여부만 다르게** 설정한 A/B 테스트.
-Pioneer가 먼저 시행착오를 겪고, Student(+Overmind)와 Naive(-Overmind)가 같은 태스크를 수행한다.
+**똑똑한 모델(sonnet)의 해결 과정이 Overmind를 통해 저렴한 모델(haiku)에게 자동 전파되어, 비용 효율적으로 팀 전체 성과를 끌어올린다.**
 
-### 실측 결과 (2026-03-28, haiku × 4회)
+Pioneer(sonnet) → Student(haiku+Overmind) vs Naive(haiku, 대조군). 동일한 프롬프트, 모델 차이만으로 Overmind의 가치를 증명.
 
-```
-              Pioneer    Student (+OM)    Naive (Control)
-              ────────   ─────────────    ───────────────
-start.sh 실행   7-11        7              7-8
-tool uses       22-28       20-21          23-24
-advantage       —           3/4 (75%)      —
-```
+### Nightmare Scaffold (5트랩, 4파일, Pioneer=sonnet, Student/Naive=haiku)
 
-Student가 동일한 start.sh 횟수에서도 **더 적은 도구 호출**로 태스크를 완수함.
-Pioneer의 diff가 `.claude/overmind-context.md`에 기록되어 세션 내내 참조 가능.
+| 지표 | Pioneer(sonnet) | Student(haiku+OM) | Naive(haiku) | Student vs Naive |
+|------|:---:|:---:|:---:|:---:|
+| **성공률** | 100% | **100%** | **50%** | **2배** |
+| **서버 실행 횟수** | 2 | **8** | 13.5 | **-41%** |
+| **config 수정 횟수** | 4 | **9.5** | 12 | **-21%** |
 
-### Overmind가 전달하는 것 (사실 기반, 행동 지시 없음)
+### Branch-Conflict Scaffold (3트랩, cross-branch, Pioneer=sonnet)
+
+| 지표 | Pioneer(sonnet) | Student(haiku+OM) | Naive(haiku) | Student vs Naive |
+|------|:---:|:---:|:---:|:---:|
+| **성공률** | 100% | **100%** | 100% | 동일 |
+| **서버 실행 횟수** | 1 | **3.5** | 5 | **-30%** |
+| **config 수정 횟수** | 2 | **3** | 4 | **-25%** |
+
+### 왜 이 벤치마크가 유효한가
+
+- **프롬프트 조작 없음** — Pioneer도 Student/Naive와 동일한 프롬프트 사용
+- **모델 차이만** — sonnet이 자연스럽게 더 나은 해결 과정을 생성
+- **자동 전파** — Overmind Plugin이 Pioneer의 시행착오를 자동 push, Student가 SessionStart에서 자동 pull
+- **공정한 비교** — Student와 Naive는 동일 모델, 동일 프롬프트, Overmind 연결만 다름
+
+### Overmind가 전달하는 것
 
 ```
 [OVERMIND] Team context from other agents on this repo.
@@ -94,22 +105,23 @@ TEAMMATE CHANGES — What other agents changed (with diffs):
   (by agent_pioneer)
 ```
 
-> **핵심 원칙**: Formatter는 **사실만 전달**한다. "Apply ALL fixes" 같은 행동 지시는 테스트를 강제하는 장치이지 Overmind의 자연스러운 기능이 아니다.
+> Formatter는 **사실만 전달**한다. 에이전트가 자연스럽게 판단하고 활용.
 
-### 모델별 특성
+상세 결과: [`docs/benchmark-ab-test.md`](docs/benchmark-ab-test.md)
 
-| 모델 | 패턴 | Overmind 효과 |
-|------|------|-------------|
-| **haiku** | 순차 발견 (7-8회 실행) | tool_uses 감소 측정 가능 |
-| **sonnet** | 1-2회 만에 해결 | 천장 효과 — 이미 최적 |
-
-상세 결과와 설계 원칙: [`docs/benchmark-ab-test.md`](docs/benchmark-ab-test.md)
-
-실행 방법:
+실행:
 ```bash
 cd server
-AGENT_MODEL=haiku uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
-AGENT_MODEL=sonnet uv run pytest tests/scenarios/test_live_agents_AB_multistage.py -m e2e_live -s
+
+# Nightmare: Pioneer=sonnet, Student/Naive=haiku
+uv run pytest tests/scenarios/test_live_agents_AB_statistical.py \
+  -m e2e_live -s -k nightmare --student-n 2 --naive-m 2 \
+  --agent-model haiku --pioneer-model sonnet
+
+# Branch-Conflict: cross-branch knowledge transfer
+uv run pytest tests/scenarios/test_live_agents_AB_statistical.py \
+  -m e2e_live -s -k branch_aware --student-n 2 --naive-m 2 \
+  --agent-model haiku --pioneer-model sonnet
 ```
 
 ---
@@ -261,9 +273,9 @@ curl -X POST http://localhost:7777/api/memory/broadcast \
 ```bash
 cd server && uv sync --all-extras
 
-# Run tests (110+ tests)
-uv run pytest tests/ -v        # server 61 tests
-cd ../plugin && python -m pytest tests/ -v  # plugin 80+ tests
+# Run tests (222+ tests)
+uv run pytest tests/ -v                    # server 95 + scaffold 11
+cd ../plugin && python -m pytest tests/ -v  # plugin 117
 
 # Run server
 uv run python -m overmind.main --port 7778

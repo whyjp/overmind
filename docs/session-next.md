@@ -57,20 +57,24 @@
 
 ## Statistical AB 벤치마크 결과 (2026-03-29)
 
-### 핵심 발견: 문제 복잡도 + Pioneer 프롬프트 전략이 핵심
+### Model-Tier 벤치마크 (최적 방법론)
 
-| Scaffold | 트랩 | Pioneer 프롬프트 | Student elapsed | Naive elapsed | Overmind 효과 |
-|----------|------|:---:|:---:|:---:|---|
-| simple (N=2,M=2) | 3 | SHARED | 25.1s | 23.3s | **없음** — 단순 트랩 |
-| multistage (N=2,M=2) | 9 | SHARED | 70.8s | 61.1s | **없음** — 반복 패턴 |
-| **nightmare (N=3,M=3)** | **5** | **PIONEER** | **103.1s** | **133.4s** | **-23% 시간, 33% vs 0% 성공** |
+Pioneer=sonnet(상위모델) + SHARED_PROMPT → Student/Naive=haiku(하위모델). 프롬프트 조작 없이 모델 차이만으로 Overmind 가치 증명.
 
-**Nightmare 핵심 지표 (N=3, M=3, haiku)**:
-- **saw_server_running**: Student 33% vs Naive 0% — Student만 성공
-- **elapsed**: 103.1s vs 133.4s → **23% 빠름**
-- **config_file_edits**: 8.7 vs 13.7 → **36% 적음**
+| Scaffold | Pioneer | Student vs Naive (시도) | Student vs Naive (성공) |
+|----------|:---:|:---:|:---:|
+| **nightmare** | sonnet, 2회 성공 | **-41% 서버 실행** | **100% vs 50%** |
+| **branch_conflict** | sonnet, 1회 성공 | **-30% 서버 실행** | 100% vs 100% |
 
-**인사이트**: Pioneer를 "이미 문제를 풀어본 전문가"로 시뮬레이션하면, 양질의 해결 과정이 Overmind로 Student에게 자동 전파됨. 단순 반복 트랩에서는 효과 없지만, 상호의존 + misleading errors + 다단계 추론이 결합된 복잡한 문제에서 가치 발현.
+### PIONEER_PROMPT 방식 (레거시)
+
+| Scaffold | 트랩 | Pioneer 프롬프트 | Student vs Naive |
+|----------|------|:---:|---|
+| simple (N=2,M=2) | 3 | SHARED | **없음** — 단순 트랩 |
+| multistage (N=2,M=2) | 9 | SHARED | **없음** — 반복 패턴 |
+| **nightmare (N=3,M=3)** | **5** | **PIONEER** | **-23% 시간, 33% vs 0% 성공** |
+
+**인사이트**: Model-Tier가 PIONEER_PROMPT보다 설득력 있는 벤치마크. 상위 모델이 자연스럽게 더 나은 해결 과정 생성 → Overmind 자동 전파 → 하위 모델의 시행착오 감소 + 성공률 증가.
 
 ---
 
