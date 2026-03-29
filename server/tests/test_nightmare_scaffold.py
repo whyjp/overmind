@@ -16,7 +16,6 @@ from tests.fixtures.ab_scaffolds.nightmare import (
     REPO_NAME,
     SCAFFOLD_FILES,
     SHARED_PROMPT,
-    check_config,
     create_scaffold,
 )
 
@@ -93,7 +92,7 @@ def nightmare_repo(tmp_path: Path) -> Path:
 
 
 def _run_server(repo_dir: Path) -> tuple[int, str, str]:
-    """Run `bash start.sh` in the repo and return (rc, stdout, stderr)."""
+    """Run server.py directly (cross-platform; avoids bash dependency)."""
     result = subprocess.run(
         [sys.executable, "src/server.py"],
         cwd=str(repo_dir),
