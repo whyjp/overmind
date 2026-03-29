@@ -3,6 +3,7 @@
 Each scaffold module exposes:
   SCAFFOLD_FILES: dict[str, str]
   SHARED_PROMPT: str
+  PIONEER_PROMPT: str  (optional — smarter prompt for pioneer agent)
   REPO_NAME: str
   REPO_ID: str
   MAX_TURNS: int

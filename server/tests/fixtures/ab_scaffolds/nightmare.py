@@ -31,6 +31,22 @@ SHARED_PROMPT = (
     "Do NOT modify files under src/ or create new files."
 )
 
+# Pioneer gets a smarter prompt that guides systematic investigation.
+# The VALUE is that this structured approach (read source → map dependencies →
+# fix holistically) gets propagated to Students via Overmind, while Naives
+# are left doing blind trial-and-error with SHARED_PROMPT.
+PIONEER_PROMPT = (
+    "Get the Hive server running. "
+    "Run `bash start.sh` to see the first error. "
+    "IMPORTANT: Before fixing anything, read the source files under src/ to understand "
+    "the full validation chain and dependencies between config files. "
+    "Map out which config values depend on each other across config.toml, .env, "
+    "secrets/hmac.key, and plugins/registry.json. "
+    "Then fix ALL issues at once rather than one at a time. "
+    "You may edit config.toml, .env, secrets/hmac.key, plugins/registry.json. "
+    "Do NOT modify files under src/ or create new files."
+)
+
 SCAFFOLD_FILES: dict[str, str] = {
     # ── Project rules ──
     "CLAUDE.md": """# Hive Server

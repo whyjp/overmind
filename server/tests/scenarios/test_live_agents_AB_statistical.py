@@ -74,9 +74,12 @@ def test_statistical_ab(scaffold_name, claude_cli, server, base_url, tmp_path, r
     print(f"  Created {1 + N + M} scaffold repos")
 
     # Phase 1: Pioneer (sequential)
-    print(f"\n  Phase 1: Pioneer")
+    # Use PIONEER_PROMPT if scaffold provides one (smarter approach for complex scenarios),
+    # otherwise fall back to SHARED_PROMPT
+    pioneer_prompt = getattr(scaffold, "PIONEER_PROMPT", scaffold.SHARED_PROMPT)
+    print(f"\n  Phase 1: Pioneer (prompt={'PIONEER' if pioneer_prompt != scaffold.SHARED_PROMPT else 'SHARED'})")
     pioneer = run_agent(
-        prompt=scaffold.SHARED_PROMPT, cwd=repos["pioneer"],
+        prompt=pioneer_prompt, cwd=repos["pioneer"],
         user="pioneer", state_file=state_dir / "state_pioneer.json",
         base_url=base_url, repo_id=scaffold.REPO_ID,
         max_turns=scaffold.MAX_TURNS, with_overmind=True, model=model,
