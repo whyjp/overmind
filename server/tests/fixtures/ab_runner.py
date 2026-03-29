@@ -307,6 +307,24 @@ def analyze_conversation(events: list[dict]) -> dict:
         and first_config_edit_step < first_server_run_step
     )
 
+    # Branch-conflict specific metrics
+    port_conflict_count = 0
+    for evt in events:
+        if evt.get("type") == "user":
+            # Check tool_use_result
+            result = evt.get("tool_use_result")
+            if result and isinstance(result, str):
+                if "AddressError" in result or "port conflict" in result:
+                    port_conflict_count += 1
+            # Check message content blocks
+            msg = evt.get("message", {})
+            if isinstance(msg, dict):
+                for block in msg.get("content", []):
+                    if isinstance(block, dict):
+                        content = str(block.get("content", ""))
+                        if "AddressError" in content or "port conflict" in content:
+                            port_conflict_count += 1
+
     return {
         "total_tool_uses": len(tool_uses),
         "bash_commands": len(bash_commands),
@@ -323,6 +341,7 @@ def analyze_conversation(events: list[dict]) -> dict:
         "proactive_config_fix": proactive_config_fix,
         "first_config_edit_step": first_config_edit_step,
         "first_server_run_step": first_server_run_step,
+        "port_conflict_count": port_conflict_count,
     }
 
 
@@ -357,6 +376,7 @@ NUMERIC_METRICS = [
     "src_file_edits",
     "first_config_edit_step",
     "first_server_run_step",
+    "port_conflict_count",
 ]
 
 BOOLEAN_METRICS = [
